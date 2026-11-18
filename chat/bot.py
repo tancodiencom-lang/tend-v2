@@ -69,13 +69,13 @@ def new_code(user):
 
 @transaction.atomic
 def link(code, external_id, chat_id, display_name):
-    row = (LinkCode.objects.select_for_update().filter(digest=_digest(code.strip()), used_at__isnull=True,
+    row = (LinkCode.objects.select_for_update(of=("self",)).filter(digest=_digest(code.strip()), used_at__isnull=True,
                                                        expires_at__gt=timezone.now()).select_related("user").first())
     if row is None or not row.user.is_active:
         raise ValidationError("Mã không đúng hoặc đã hết hạn. Lấy mã mới ở Tend › Tài khoản › Kết nối Telegram.")
     row.used_at = timezone.now()
     row.save(update_fields=["used_at"])
-    for old in ChatLink.objects.select_for_update().filter(active=True).filter(Q(user=row.user) | Q(external_id=str(external_id))):
+    for old in ChatLink.objects.select_for_update(of=("self",)).filter(active=True).filter(Q(user=row.user) | Q(external_id=str(external_id))):
         old.active = False
         record_save(old, row.user, "Thay kết nối Telegram", channel="telegram")
     return record_save(ChatLink(user=row.user, external_id=str(external_id), chat_id=str(chat_id), display_name=display_name[:200]),
@@ -84,7 +84,7 @@ def link(code, external_id, chat_id, display_name):
 
 @transaction.atomic
 def unlink(link_row, actor, reason="Ngắt kết nối Telegram", channel="telegram"):
-    row = ChatLink.objects.select_for_update().get(pk=link_row.pk)
+    row = ChatLink.objects.select_for_update(of=("self",)).get(pk=link_row.pk)
     if row.active:
         row.active = False
         record_save(row, actor, reason, channel=channel)
@@ -341,7 +341,7 @@ def _proposal_reply(chat_id, proposal):
 
 
 def _pending(link_row, short_id):
-    for proposal in Proposal.objects.select_for_update().filter(link__user=link_row.user, state=Proposal.State.PENDING,
+    for proposal in Proposal.objects.select_for_update(of=("self",)).filter(link__user=link_row.user, state=Proposal.State.PENDING,
                                                                created_at__gte=timezone.now() - PROPOSAL_TTL):
         if str(proposal.pk).startswith(short_id):
             return proposal
@@ -350,7 +350,7 @@ def _pending(link_row, short_id):
 
 @transaction.atomic
 def choose_photo(link_row, photo_id, choice):
-    photo = (ChatPhoto.objects.select_for_update().filter(pk=photo_id, link__user=link_row.user, target="?",
+    photo = (ChatPhoto.objects.select_for_update(of=("self",)).filter(pk=photo_id, link__user=link_row.user, target="?",
                                                          proposal__state=Proposal.State.PENDING).select_related("proposal").first())
     if photo is None:
         return "Ảnh này đã được chọn hoặc phiếu không còn chờ.", None
@@ -399,7 +399,7 @@ def choose_person(link_row, short_id, index, choice):
 
 @transaction.atomic
 def add_reason(link_row, proposal_id, reason):
-    proposal = Proposal.objects.select_for_update().filter(pk=proposal_id, link__user=link_row.user, state=Proposal.State.PENDING).first()
+    proposal = Proposal.objects.select_for_update(of=("self",)).filter(pk=proposal_id, link__user=link_row.user, state=Proposal.State.PENDING).first()
     if proposal is None:
         return None
     reason = reason.strip()[:500]
@@ -491,7 +491,7 @@ def build_answer(link_row, ask_id, note, source_text):
 
 @transaction.atomic
 def decide(link_row, proposal_id, confirm):
-    proposal = Proposal.objects.select_for_update().filter(pk=proposal_id, link__user=link_row.user).select_related("project").first()
+    proposal = Proposal.objects.select_for_update(of=("self",)).filter(pk=proposal_id, link__user=link_row.user).select_related("project").first()
     if proposal is None:
         return "Không tìm thấy phiếu."
     if proposal.state != Proposal.State.PENDING:
