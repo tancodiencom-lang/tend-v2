@@ -188,7 +188,8 @@ def contract_value(project):
     items = sum((Decimal(str(r["quantity"] or 0)) * Decimal(str(r["contract_unit_price"] or 0)) for r in project["estimate"]), Decimal(0))
     if not items:
         return None
-    return items - Decimal(str(project["discount_amount"] or 0)) + project["signed_variations"]
+    total = items - Decimal(str(project["discount_amount"] or 0)) + project["signed_variations"]
+    return total.quantize(Decimal(1))   # tiền đồng chẵn (khối lượng × đơn giá có thể lẻ)
 
 
 def role_of(user):
@@ -210,12 +211,15 @@ class Command(BaseCommand):
         parser.add_argument("--nguoi", help="Tên đăng nhập (bản mới) đứng tên nhật ký khi ghi")
 
     def handle(self, *args, nguon, codes, thuc_hien, nguoi, **options):
-        actor = None
-        if thuc_hien:
-            actor = User.objects.filter(username=nguoi).first() if nguoi else None
-            if actor is None or not actor.is_director:
-                raise CommandError("Ghi cần --nguoi là tài khoản Giám đốc đã có trong bản mới (tạo bằng createsuperuser).")
         users, projects = read_old(nguon, set(codes or ()))
+        actor, actor_old = None, None
+        if thuc_hien:
+            # Người đứng tên nhật ký: Giám đốc đã có ở bản mới, hoặc Giám đốc của bản cũ (chép trước, rồi đứng tên).
+            actor = User.objects.filter(username=nguoi).first() if nguoi else None
+            if actor is None and nguoi:
+                actor_old = next((u for u in users if u["username"] == nguoi and role_of(u) == Role.DIRECTOR and u["is_active"]), None)
+            if (actor is None or not actor.is_director) and actor_old is None:
+                raise CommandError("Ghi cần --nguoi là tên đăng nhập của Giám đốc (ở bản cũ hoặc bản mới), vd --nguoi quan.")
         lines, warnings = [], []
         by_old = {}
         for user in users:
@@ -254,13 +258,19 @@ class Command(BaseCommand):
             return
         with transaction.atomic():
             reason = "Chép từ Tend cũ"
-            for old_id, value in list(by_old.items()):
+            if actor_old is not None:   # Giám đốc bản cũ: tạo trước để đứng tên các bản ghi sau
+                order = sorted(by_old.items(), key=lambda pair: pair[0] != actor_old["id"])
+            else:
+                order = list(by_old.items())
+            for old_id, value in order:
                 if isinstance(value, tuple):
                     user, role = value
                     new = User(username=user["username"], first_name=user["first_name"] or "", last_name=user["last_name"] or "",
                                email=user["email"] or "", is_active=bool(user["is_active"]), role=role, password=user["password"])
                     record_save(new, actor, reason, channel="lenh")
                     by_old[old_id] = new
+                    if actor is None:
+                        actor = new
             for project, items in planned:
                 new = Project(code=project["code"], name=project["name"], address=project["address"] or "",
                               start_date=project["start_date"], handover_date=project["handover_date"],

@@ -55,7 +55,7 @@ def old_db():
     db.execute("INSERT INTO projects_project VALUES (2,'XOA','Đã xoá','',NULL,NULL,NULL,0,'intake',NULL,1)")
     db.execute("INSERT INTO projects_projectmembership VALUES (1,1,3,1),(2,1,4,0)")
     db.execute("INSERT INTO progress_floorplan VALUES (1,1,2,?,?, 'tn22.dxf')", (json.dumps([0, 0, 9000, 6000]), json.dumps({"KT-COT": "M0 0 L1 1"})))
-    db.execute("INSERT INTO projects_estimateitem VALUES (1,1,'Xây tường 110','m²',20,300000,200000,'Tầng 2',1,0),"
+    db.execute("INSERT INTO projects_estimateitem VALUES (1,1,'Xây tường 110','m²',20.125,300000,200000,'Tầng 2',1,0),"
                "(2,1,'Vận chuyển','chuyến',3,1500000,NULL,'',2,0)")
     db.execute("INSERT INTO projects_variationorder VALUES (1,1,2000000,'signed',0),(2,1,9000000,'pending',0)")
     geo = json.dumps({"f": 2, "pts": [[0, 0], [3000, 0], [3000, 110], [0, 110]]})
@@ -94,7 +94,7 @@ class CopyOldTests(TestCase):
         before = hashlib.sha256(self.path.read_bytes()).hexdigest()
         self.run_command("--thuc-hien", "--nguoi", "giamdoc")
         project = Project.objects.get(code="TN-22")
-        self.assertEqual(project.contract_value, Decimal("11500000"))   # 6tr + 4,5tr − 1tr chiết khấu + 2tr phát sinh đã ký (không tính chờ ký)
+        self.assertEqual(project.contract_value, Decimal("11537500"))   # 20,125×300k + 4,5tr − 1tr chiết khấu + 2tr phát sinh đã ký
         roles = dict(User.objects.values_list("username", "role"))
         self.assertEqual(roles, {"giamdoc": Role.DIRECTOR, "quan": Role.DIRECTOR, "cht-thu": Role.SUPERVISOR,
                                  "ketoantend": Role.INTERNAL_ACCOUNTANT, "ktttend": Role.FINANCE_ACCOUNTANT, "admin": Role.DIRECTOR})
@@ -118,6 +118,17 @@ class CopyOldTests(TestCase):
         out = self.run_command("--thuc-hien", "--nguoi", "giamdoc")
         self.assertIn("Công trình TN-22: đã có ở bản mới, bỏ qua", out)
         self.assertEqual(AuditLog.objects.count(), count)
+
+    def test_old_director_signs_log(self):
+        User.objects.filter(username="giamdoc").delete()
+        out = self.run_command("--thuc-hien", "--nguoi", "quan")
+        self.assertIn("Đã chép", out)
+        quan = User.objects.get(username="quan")
+        self.assertEqual(quan.role, Role.DIRECTOR)
+        self.assertTrue(AuditLog.objects.filter(table="projects.Project", actor=quan).exists())
+        self.assertIsNone(AuditLog.objects.get(table="core.User", object_id=str(quan.pk)).actor)
+        with self.assertRaises(CommandError):
+            self.run_command("--thuc-hien", "--nguoi", "cht-thu")    # không phải Giám đốc
 
     def test_write_needs_director(self):
         User.objects.create_user("gs", password="x-123-abcd", role=Role.SUPERVISOR)

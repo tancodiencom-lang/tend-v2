@@ -36,7 +36,7 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 3. ✓ Bot giám sát: báo cáo, ảnh, lý do giảm, chấm công; bảng công tháng, chi phí công nhật. Xem mục dưới.
 4. ✓ Bot kế toán: phiếu thu/chi (chữ, ảnh phiếu), lệnh tra cứu; xuất MISA. Xem mục dưới.
 5. ✓ Báo cáo tải về (Excel). Xem mục dưới.
-6. Triển khai `app.tend.vn`, chuyển bot sang; so.tend.vn chỉ tra cứu.
+6. Triển khai `app.tend.vn` song song so.tend.vn (cùng máy chủ): mã, script và hướng dẫn xong — [docs/TRIEN-KHAI.md](docs/TRIEN-KHAI.md); chờ chủ dự án chạy trên máy chủ.
 
 ## Bản vẽ (đợt 2, 18/11/2026)
 
@@ -71,3 +71,10 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - **Tổng quan 5 câu hỏi** `/bao-cao/tai/tong-quan/`: trang tóm tắt + mỗi công trình một trang (tiến độ, quá hạn, nợ NCC/tổ/công nhật, khách, lãi lỗ).
 - **Báo cáo tháng theo công trình** `/bao-cao/tai/thang/?cong_trinh=&thang=YYYY-MM`: Tóm tắt, Tiến độ từng chi tiết (% đầu/cuối tháng theo báo cáo mới nhất tới mốc, KL làm trong tháng = thiết kế × chênh %, giá trị bán/vốn theo quyền), Báo cáo ngày, Chấm công (đơn giá chỉ vai xem chi phí), Thu chi (vai kế toán). Tháng chưa tới: 404.
 - **Lãi lỗ** `/bao-cao/tai/lai-lo/` (chỉ Giám đốc, kế toán tài chính): doanh thu, giá trị đã làm, chi phí theo loại (`overview.compute.profit` thêm `parts`, `earned`), lãi theo tiến độ, giá vốn còn lại, lãi dự báo, ghi chú thiếu dữ liệu, dòng TỔNG.
+
+## Triển khai (đợt 6, 18/11/2026)
+
+- Repo `tancodiencom-lang/tend-v2` (nhánh `main` = lịch sử đợt 1–5). Làm việc trên nhánh riêng, mở PR; chủ dự án gộp.
+- Cùng droplet với bản cũ, tách hẳn: user `tendv2`, `/srv/tend-v2`, CSDL `tendv2`, dịch vụ `tend-v2` (:8002, 2 tiến trình), Caddy chỉ thêm `/etc/caddy/sites/app.tend.vn.caddy` (Caddyfile bản cũ `import /etc/caddy/sites/*.caddy`). Bot Telegram riêng. Sao lưu 02:30 cùng kho rclone `tendcrypt:tend-v2/`; tóm tắt thu chi 18:13.
+- Cài lần đầu bằng `tend-app/ha-tang/cai-tend-v2.sh` (đã có trên máy chủ qua deploy bản cũ); triển khai `ha-tang/trien-khai.sh`; chép dữ liệu `ha-tang/chep-du-lieu-cu.sh` (sao CSDL cũ thành `tend_ban_sao` rồi `chep_ban_cu`, `--nguoi` nhận Giám đốc bản cũ).
+- Đã diễn tập trên PostgreSQL 16: 74/74 bài kiểm, `check --deploy`, chép từ CSDL bản cũ thật (mã tend-app). Chưa chạy trên máy chủ thật.
