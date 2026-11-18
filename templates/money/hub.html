@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}Báo cáo{% endblock %}
+{% block content %}
+<h1>Báo cáo</h1>
+<p class="muted">Kế toán nhập phiếu thu/chi qua bot Telegram (chữ hoặc ảnh phiếu). Ở đây xem, tải Excel, xuất MISA.</p>
+<div class="cards">
+  <a class="card" href="{% url 'money_ledger' %}"><header><b>Sổ thu chi</b></header><span class="muted">Phiếu theo ngày, công trình, loại, đối tượng; phiếu huỷ gạch ngang; tải Excel.</span></a>
+  <a class="card" href="{% url 'money_debts' %}"><header><b>Công nợ</b></header><span class="muted">Nhà cung cấp, tổ thợ, lương công nhật{% if user.sees_receivables %}, khách hàng{% endif %} theo công trình.</span></a>
+  {% if user.sees_payables %}<a class="card" href="{% url 'field_attendance' %}"><header><b>Bảng công</b></header><span class="muted">Công theo người, chi phí công nhật ước tính.</span></a>{% endif %}
+  {% if can_misa %}<a class="card" href="{% url 'money_misa' %}"><header><b>Xuất MISA</b></header><span class="muted">Phiếu thu, phiếu chi, mua hàng theo mẫu nhập khẩu MISA ASP.</span></a>{% endif %}
+  <a class="card" href="{% url 'money_parties' %}"><header><b>Đối tượng</b></header><span class="muted">Nhà cung cấp, tổ thợ, khách: mã MISA, mã số thuế, công nợ.</span></a>
+</div>
+{% endblock %}

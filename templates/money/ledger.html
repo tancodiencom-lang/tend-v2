@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% load tend %}{% block title %}Sổ thu chi{% endblock %}
+{% block content %}
+<p><a href="{% url 'reports' %}">‹ Báo cáo</a></p>
+<h1>Sổ thu chi</h1>
+<form method="get" class="filters">
+  <label>Từ <input type="date" name="tu" value="{{ start|date:'Y-m-d' }}"></label>
+  <label>Đến <input type="date" name="den" value="{{ end|date:'Y-m-d' }}"></label>
+  <select name="cong_trinh" aria-label="Công trình"><option value="">Mọi công trình + khoản chung</option>{% for p in projects %}<option value="{{ p.code }}"{% if p == project %} selected{% endif %}>{{ p.code }}</option>{% endfor %}</select>
+  <select name="loai" aria-label="Loại phiếu"><option value="">Mọi loại</option>{% for k, l in kinds %}<option value="{{ k }}"{% if k == kind %} selected{% endif %}>{{ l }}</option>{% endfor %}</select>
+  <input type="text" name="doi_tuong" value="{{ who }}" placeholder="Đối tượng" aria-label="Đối tượng">
+  <button class="btn plain" type="submit">Xem</button>
+  <a class="btn" href="?{{ request.GET.urlencode }}&tai=xlsx">Tải Excel</a>
+</form>
+<section class="sum"><div><span>Tổng thu</span><b>{{ totals.receipts|vnd }}</b></div><div><span>Tổng chi</span><b>{{ totals.payments|vnd }}</b></div>{% if totals.accruals %}<div><span>Phát sinh nợ (hàng NCC, khoán)</span><b>{{ totals.accruals|vnd }}</b></div>{% endif %}</section>
+{% if not rows %}<p class="missing">Không có phiếu nào trong khoảng này.</p>{% else %}
+<div class="scroll"><table class="grid wide">
+<thead><tr><th>Ngày</th><th>Số phiếu</th><th>Loại</th><th>Đối tượng</th><th>Công trình</th><th>Nội dung</th><th class="n">Thu</th><th class="n">Chi</th><th class="n">Phát sinh nợ</th><th>Chứng từ</th></tr></thead>
+<tbody>{% for e in rows %}<tr class="{% if e.voided_at %}void{% endif %}"><td>{{ e.date|date:"d/m/Y" }}</td><td>{{ e.number|default:"—" }}</td><td>{{ e.get_kind_display }}<br><small class="muted">{{ e.get_method_display }} · {{ e.entered_by }}</small></td><td>{{ e.party }}</td><td>{% if e.project %}{{ e.project.code }}{% else %}Chung{% endif %}</td><td>{{ e.content }}{% if e.voided_at %}<br><b class="bad">× Đã huỷ:</b> {{ e.void_reason }}{% endif %}</td>
+<td class="n">{% if e.kind in receipts %}{{ e.amount|vnd }}{% endif %}</td><td class="n">{% if e.kind not in receipts and e.kind not in accruals %}{{ e.amount|vnd }}{% endif %}</td><td class="n">{% if e.kind in accruals %}{{ e.amount|vnd }}{% endif %}</td>
+<td>{% if e.voucher %}<a href="{% url 'money_voucher' e.pk %}" target="_blank" rel="noopener">Xem ảnh</a>{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div>{% endif %}
+{% endblock %}

@@ -8,6 +8,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models.fields.files import FieldFile
 from django.forms.models import model_to_dict
 
 _local = threading.local()
@@ -45,8 +46,8 @@ def _plain(value):
         return [_plain(v) for v in value]
     if isinstance(value, dict):
         return {k: _plain(v) for k, v in value.items()}
-    if hasattr(value, "name") and hasattr(value, "url"):   # tệp
-        return getattr(value, "name", "") or ""
+    if isinstance(value, FieldFile):   # tệp (có thể trống)
+        return value.name or ""
     return value
 
 

@@ -30,7 +30,9 @@ from field.models import Attendance, Worker
 from field.workers import match
 from projects.models import Project
 
-from . import ai, parse, reads, telegram
+from money import services as money
+
+from . import ai, money_bot, parse, reads, telegram
 from .models import ChatLink, ChatPhoto, ChatUpdate, LinkCode, Proposal
 
 CODE_TTL = timedelta(minutes=15)
@@ -43,7 +45,10 @@ HELP = ("Tend qua Telegram:\n"
         "• Ảnh cho từng chi tiết: chú thích ảnh ghi mã (vd T2.5); ảnh không chú thích bot sẽ hỏi.\n"
         "• Hỏi: \"TN-22 đang chậm bao nhiêu?\", \"tháng này Hùng bao nhiêu công?\"\n"
         "• Lệnh: /tongquan, /cong (công tháng này), /yeucau, /congtrinh, /suacong TN-22 17/11 Hùng 0,5 lý do …, "
-        "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup")
+        "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup\n"
+        "• Kế toán: chụp ảnh phiếu hoặc nhắn \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng\" (loại: thu khách, thu khác, "
+        "nhận hàng, khoán, trả NCC, trả tổ, trả lương, chi). Tra cứu: /thuchi hôm nay|tuần|tháng, /congno [TN-22], /baocao tuần|tháng, "
+        "/doituong <tên>. Huỷ: /huy PC12 lý do.")
 
 
 # ---------- kết nối ----------
@@ -204,6 +209,8 @@ def unresolved_people(proposal):
 
 
 def blockers(proposal):
+    if proposal.kind == Proposal.Kind.MONEY:
+        return money_bot.blockers(proposal)
     if proposal.kind != Proposal.Kind.REPORT:
         return []
     out = []
@@ -221,6 +228,10 @@ def _after_change(link_row, proposal):
 
 
 def summary(proposal):
+    if proposal.kind == Proposal.Kind.MONEY:
+        return money_bot.summary(proposal)
+    if proposal.kind == Proposal.Kind.VOID:
+        return money_bot.void_summary(proposal) + "\nBấm Xác nhận để huỷ phiếu này."
     p = proposal.payload
     out = [f"PHIẾU CHỜ XÁC NHẬN · {proposal.project.code if proposal.project else ''}"]
     if proposal.kind == Proposal.Kind.REPORT:
@@ -325,6 +336,8 @@ def _proposal_reply(chat_id, proposal):
     if proposal.kind == Proposal.Kind.REPORT:
         ask_photos(chat_id, proposal)
         ask_people(chat_id, proposal)
+    elif proposal.kind == Proposal.Kind.MONEY:
+        money_bot.ask(chat_id, proposal, reads.projects(proposal.link.user))
 
 
 def _pending(link_row, short_id):
@@ -519,6 +532,12 @@ def decide(link_row, proposal_id, confirm):
                 field.set_worker(user, worker, day_rate=Decimal(p["day_rate"]) if p.get("day_rate") is not None else None,
                                  pay=p.get("pay"), channel="telegram")
                 result = {"url": "/tho/"}
+            elif proposal.kind == Proposal.Kind.MONEY:
+                result = money_bot.confirm(proposal, user)
+            elif proposal.kind == Proposal.Kind.VOID:
+                if p.get("needs_director"):
+                    raise PermissionDenied("Phiếu này cần Giám đốc duyệt huỷ.")
+                result = money_bot.confirm_void(proposal, user)
             else:
                 ask = Ask.objects.get(pk=p["ask_id"])
                 asks.answer(user, ask, p["note"])
@@ -589,6 +608,24 @@ def handle_text(link_row, text):
     if command == "/ngatketnoi":
         unlink(link_row, user)
         return "Đã ngắt kết nối Telegram với Tend.", None
+    if command == "/congno":
+        return reads.debts_text(user, text.split()[1] if len(text.split()) > 1 else None), None
+    if command in ("/thuchi", "/baocao"):
+        arg = " ".join(text.split()[1:])
+        span = parse.period(arg or ("" if command == "/thuchi" else "tuần"))
+        if span is None:
+            return f"Gõ {command} hôm nay | hôm qua | tuần | tháng | 15/11.", None
+        return (reads.entries_text if command == "/thuchi" else reads.report_text)(user, *span), None
+    if command == "/doituong":
+        name = " ".join(text.split()[1:])
+        rows = reads.find_parties(user, name) if name else []
+        return ("\n".join(f"• {r['name']} ({r['type'].lower()}){' · MISA ' + r['misa_code'] if r['misa_code'] else ''}" for r in rows)
+                or "Không thấy đối tượng nào. Gõ /doituong <tên>."), None
+    if command == "/huy":
+        parts = text.split(maxsplit=2)
+        if len(parts) < 2:
+            return "Cú pháp: /huy PC12 lý do huỷ (hoặc /huy #123 lý do).", None
+        return _void(link_row, parts[1], parts[2] if len(parts) > 2 else "", text)
     if command == "/suacong":
         data = parse.fix(text)
         if data is None:
@@ -609,10 +646,16 @@ def handle_text(link_row, text):
         _state(link_row, answer_to=None)
         return None, build_answer(link_row, ask_id, text, text)
     if ai.available():
+        photos = _unassigned_photos(link_row)
+        images = []
+        if money.kinds_for(user):     # kế toán, Giám đốc: AI xem ảnh để đọc phiếu thu/chi
+            for photo in photos[:4]:
+                images.append(photo.image.read())
+                photo.image.close()
         result = ai.run(text, list(state.get("history") or []),
                         f"Hôm nay {timezone.localdate():%d/%m/%Y}. Người dùng: {user} (vai {user.get_role_display()}). "
-                        f"Ảnh vừa gửi chưa gắn phiếu: {len(_unassigned_photos(link_row))}.",
-                        lambda name, data: reads.execute(user, name, data))
+                        f"Ảnh vừa gửi chưa gắn phiếu: {len(photos)}" + (f" (ảnh số 0–{len(images) - 1} đính kèm)." if images else "."),
+                        lambda name, data: reads.execute(user, name, data), images=images)
         if result is not None:
             if result["type"] == "text":
                 _remember(link_row, text, result["text"])
@@ -625,12 +668,31 @@ def handle_text(link_row, text):
                 return None, build_fix(link_row, data, text)
             if result["tool"] == "propose_answer":
                 return None, build_answer(link_row, data.get("ask_id"), data.get("note", ""), text)
+            if result["tool"] == "propose_entries":
+                return None, money_bot.build(link_row, data, text)
+            if result["tool"] == "propose_void":
+                return _void(link_row, data.get("ref", ""), data.get("reason", ""), text)
             return None, build_report(link_row, data, text)
+    data = parse.money(text, reads.projects(user))
+    if data:
+        return None, money_bot.build(link_row, data, text)
     data = parse.report(text, reads.projects(user))
     if data:
         return None, build_report(link_row, data, text)
     return ("Chưa hiểu tin nhắn. Trợ lý AI chưa bật nên bot đọc cú pháp ngắn, ví dụ:\n"
             "\"TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ\" (kèm ảnh).\n/trogiup để xem lệnh."), None
+
+
+def _void(link_row, ref, reason, text):
+    """Huỷ phiếu: tự huỷ được thì lập phiếu chờ Xác nhận; không thì gửi Giám đốc duyệt."""
+    proposal = money_bot.build_void(link_row, ref, reason, text)
+    if not proposal.payload["needs_director"]:
+        return None, proposal
+    sent = money_bot.send_to_directors(proposal)
+    if not sent:
+        return ("Phiếu cũ hoặc đã xuất MISA cần Giám đốc duyệt huỷ, nhưng chưa có Giám đốc nào kết nối Telegram. "
+                "Báo Giám đốc kết nối rồi gửi lại."), None
+    return "Phiếu cũ hoặc đã xuất MISA: đã gửi Giám đốc duyệt huỷ. Bot sẽ báo lại khi Giám đốc quyết định.", None
 
 
 def _sender(message):
@@ -747,6 +809,21 @@ def handle_callback(callback):
             (telegram.edit_caption if kind == "ph" else lambda c, m, t: telegram.edit(c, m, t))(chat_id, message["message_id"], text)
         if proposal is not None and not proposal.photos.filter(target="?").exists() and not unresolved_people(proposal):
             telegram.send(chat_id, summary(proposal), _buttons(proposal))
+        return
+    if kind in ("mp", "mj", "md"):
+        short_id, index, choice = (value.split(":") + ["", ""])[:3]
+        text, proposal = money_bot.choose(link_row, kind, short_id, index, choice)
+        telegram.answer_callback(callback.get("id", ""), text)
+        if message.get("message_id") and text.startswith("✓"):
+            telegram.edit(chat_id, message["message_id"], text)
+        if proposal is not None and not money_bot.blockers(proposal):
+            telegram.send(chat_id, summary(proposal), _buttons(proposal))
+        return
+    if kind in ("dv", "dx"):
+        text = money_bot.director_decide(link_row, value, kind == "dv")
+        telegram.answer_callback(callback.get("id", ""), text)
+        if message.get("message_id"):
+            telegram.edit(chat_id, message["message_id"], (message.get("text") or "") + "\n\n" + text)
         return
     if kind == "ans":
         _state(link_row, answer_to=value)

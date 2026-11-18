@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}Xuất MISA{% endblock %}
+{% block content %}
+<p><a href="{% url 'reports' %}">‹ Báo cáo</a></p>
+<h1>Xuất MISA</h1>
+{% for m in messages %}<p class="bad">{{ m }}</p>{% endfor %}
+<p class="muted">Tệp Excel theo mẫu nhập khẩu MISA ASP. Phiếu đã huỷ không xuất. Phiếu đã xuất được đánh dấu để lần sau không xuất trùng. Tài khoản hạch toán sửa ở trang quản trị › Cài đặt kế toán.</p>
+<form method="post" class="row-form box">{% csrf_token %}
+  <label>Loại tệp <select name="loai">{% for k, l in labels %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></label>
+  <label>Công trình <select name="cong_trinh"><option value="">Mọi công trình được giao + khoản chung</option>{% for p in projects %}<option value="{{ p.code }}">{{ p.code }}</option>{% endfor %}</select></label>
+  <label>Từ ngày <input type="date" name="tu" value="{{ start|date:'Y-m-d' }}"></label>
+  <label>Đến ngày <input type="date" name="den" value="{{ end|date:'Y-m-d' }}"></label>
+  <label class="check"><input type="checkbox" name="ca_da_xuat" value="1"> Xuất lại cả phiếu đã xuất</label>
+  <button class="btn" type="submit">Tải tệp MISA</button>
+</form>
+{% if history %}<section class="box"><h2>Các lần xuất gần đây</h2><ul class="lines">{% for h in history %}<li><span>{{ h.created_at|date:"d/m/Y H:i" }} · {{ h.created_by }} · {{ h.project.code|default:"mọi công trình" }}</span><span>{{ h.kind }} · {{ h.row_count }} dòng · {{ h.date_from|date:"d/m" }}–{{ h.date_to|date:"d/m/Y" }}</span></li>{% endfor %}</ul></section>{% endif %}
+{% endblock %}

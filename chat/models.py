@@ -48,6 +48,8 @@ class Proposal(models.Model):
         FIX = "fix", "Sửa chấm công"
         RATE = "rate", "Sửa thợ"
         ANSWER = "answer", "Trả lời yêu cầu"
+        MONEY = "money", "Phiếu thu chi"
+        VOID = "void", "Huỷ phiếu"
 
     class State(models.TextChoices):
         PENDING = "pending", "Chờ xác nhận"

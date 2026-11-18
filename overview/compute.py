@@ -151,16 +151,25 @@ def labor_cost(project, start=None, end=None):
 
 
 def _sum(project, kind):
-    return Entry.objects.filter(project=project, kind=kind).aggregate(s=Sum("amount"))["s"] or ZERO
+    return live(project).filter(kind=kind).aggregate(s=Sum("amount"))["s"] or ZERO
+
+
+def live(project):
+    """Phiếu còn hiệu lực (phiếu đã huỷ không tính ở đâu cả)."""
+    return Entry.objects.filter(project=project, voided_at__isnull=True)
+
+
+def party_name(entry):
+    return entry.party_ref.name if entry.party_ref_id else entry.party
 
 
 def payables(project):
     suppliers = defaultdict(lambda: {"goods": ZERO, "paid": ZERO})
-    for row in Entry.objects.filter(project=project, kind__in=(Kind.SUPPLIER_GOODS, Kind.SUPPLIER_PAYMENT)):
-        suppliers[row.party]["goods" if row.kind == Kind.SUPPLIER_GOODS else "paid"] += row.amount
+    for row in live(project).filter(kind__in=(Kind.SUPPLIER_GOODS, Kind.SUPPLIER_PAYMENT)).select_related("party_ref"):
+        suppliers[party_name(row)]["goods" if row.kind == Kind.SUPPLIER_GOODS else "paid"] += row.amount
     teams = defaultdict(lambda: {"work": ZERO, "paid": ZERO})
-    for row in Entry.objects.filter(project=project, kind__in=(Kind.TEAM_WORK, Kind.TEAM_PAYMENT)):
-        teams[row.party]["work" if row.kind == Kind.TEAM_WORK else "paid"] += row.amount
+    for row in live(project).filter(kind__in=(Kind.TEAM_WORK, Kind.TEAM_PAYMENT)).select_related("party_ref"):
+        teams[party_name(row)]["work" if row.kind == Kind.TEAM_WORK else "paid"] += row.amount
     labor_accrued, missing = labor_cost(project)
     labor_paid = _sum(project, Kind.LABOR_PAYMENT)
     supplier_rows = [{"name": k, **v, "debt": v["goods"] - v["paid"]} for k, v in sorted(suppliers.items())]

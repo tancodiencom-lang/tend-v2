@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% load tend %}{% block title %}Đối tượng{% endblock %}
+{% block content %}
+<p><a href="{% url 'reports' %}">‹ Báo cáo</a></p>
+<h1>Đối tượng</h1>
+{% for m in messages %}<p class="{% if m.tags == 'error' %}bad{% else %}good{% endif %}">{{ m }}</p>{% endfor %}
+<p class="muted">Bot tự so tên khi kế toán nhập phiếu; tên mới bot hỏi thêm vào đây. Điền mã MISA để xuất MISA đúng đối tượng.</p>
+<form method="get" class="filters"><input type="text" name="q" value="{{ query }}" placeholder="Tìm tên" aria-label="Tìm tên"><button class="btn plain" type="submit">Tìm</button></form>
+{% if can_edit %}<details class="box"><summary><b>Thêm đối tượng</b></summary><form method="post" class="row-form">{% csrf_token %}
+  <label>Tên <input type="text" name="name" required></label>
+  <label>Loại <select name="type">{% for v, l in types %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></label>
+  <label>Mã MISA <input type="text" name="misa_code"></label><label>Mã số thuế <input type="text" name="tax_code"></label>
+  <button class="btn" type="submit">Thêm</button></form></details>{% endif %}
+<div class="cards">{% for r in rows %}{% with p=r.party %}
+<section class="card worker{% if not p.active %} off{% endif %}"><header><b>{{ p.name }}</b><span class="muted">{{ p.get_type_display }}{% if p.type == "khach" %} · đã thu {{ r.out|vnd }}{% elif r.in or r.out %} · còn nợ {{ r.debt|vnd }}{% endif %}</span></header>
+{% if can_edit %}<form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="id" value="{{ p.pk }}">
+  <label>Tên <input type="text" name="name" value="{{ p.name }}"></label>
+  <label>Loại <select name="type">{% for v, l in types %}<option value="{{ v }}"{% if v == p.type %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <label>Mã MISA <input type="text" name="misa_code" value="{{ p.misa_code }}" placeholder="chưa có"></label>
+  <label>Mã số thuế <input type="text" name="tax_code" value="{{ p.tax_code }}"></label>
+  <label>Địa chỉ <input type="text" name="address" value="{{ p.address }}"></label>
+  <label>Điện thoại <input type="text" name="phone" value="{{ p.phone }}"></label>
+  <label class="check"><input type="checkbox" name="active" value="1"{% if p.active %} checked{% endif %}> Đang dùng</label>
+  <button class="btn" type="submit">Lưu</button></form>
+{% else %}<p>{{ p.misa_code|default:"Chưa có mã MISA" }}{% if p.tax_code %} · MST {{ p.tax_code }}{% endif %}</p>{% endif %}
+</section>{% endwith %}{% empty %}<p class="missing">Chưa có đối tượng. Bot thêm khi kế toán nhập phiếu.</p>{% endfor %}</div>
+{% endblock %}

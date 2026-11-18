@@ -117,6 +117,12 @@ def execute(user, name, data):
         return find_workers(user, data.get("project_code"), data.get("name"))
     if name == "attendance_summary":
         return attendance_summary(user, data.get("project_code"), data.get("name"), data.get("start"), data.get("end"))
+    if name == "money_summary":
+        return money_summary(user, data.get("project_code"), data.get("start"), data.get("end"))
+    if name == "list_entries":
+        return list_entries(user, data.get("project_code"), data.get("party"), data.get("start"), data.get("end"))
+    if name == "find_parties":
+        return find_parties(user, data.get("name", ""))
     if name == "pending_asks":
         return [{"ask_id": str(a.pk), "project": a.project.code, "note": a.note, "items": [i.code for i in a.items.all()],
                  "due": a.due.strftime("%d/%m/%Y") if a.due else ""} for a in asks.pending_for(user)]
@@ -167,3 +173,136 @@ def month_text(user, month=None):
         out.append(line)
     out.append(f"\nBảng công: {settings.APP_URL}/cong/?thang={first:%Y-%m}")
     return "\n".join(out)
+
+
+# ---------- tiền: sổ thu chi, công nợ (theo quyền) ----------
+
+def entries_for(user, start, end, code=None, party=None):
+    from money import services as money
+    from money.models import Entry
+    allowed = projects_for(user)
+    rows = (Entry.objects.filter(kind__in=money.visible_kinds(user), date__range=(start, end))
+            .filter(models_q_project(allowed)).select_related("project", "party_ref").order_by("date", "pk"))
+    if code:
+        rows = rows.filter(project=project(user, code))
+    if party:
+        key = fold(party)
+        rows = [e for e in rows if key in fold(e.party)]
+    return list(rows)
+
+
+def models_q_project(allowed):
+    from django.db.models import Q
+    return Q(project__in=allowed) | Q(project__isnull=True)
+
+
+def money_totals(rows):
+    from money.models import ACCRUALS, RECEIPTS
+    live = [e for e in rows if not e.voided_at]
+    return {"receipts": sum((e.amount for e in live if e.kind in RECEIPTS), Decimal(0)),
+            "payments": sum((e.amount for e in live if e.kind not in RECEIPTS and e.kind not in ACCRUALS), Decimal(0)),
+            "accruals": sum((e.amount for e in live if e.kind in ACCRUALS), Decimal(0)),
+            "voided": sum(1 for e in rows if e.voided_at)}
+
+
+def _range(start, end):
+    today = timezone.localdate()
+    return (date.fromisoformat(start) if start else today.replace(day=1)), (date.fromisoformat(end) if end else today)
+
+
+def entry_line(e):
+    head = f"{e.date:%d/%m} {e.number + ' ' if e.number else ''}{e.get_kind_display()} · {e.party}"
+    where = f" · {e.project.code}" if e.project_id else ""
+    void = f" (ĐÃ HUỶ: {e.void_reason})" if e.voided_at else ""
+    return f"{head}{where}: {vnd(e.amount)}{void}"
+
+
+def debts(user, proj):
+    """Công nợ một công trình theo quyền (dùng lại overview.compute)."""
+    data = answers(user, proj, timezone.localdate())
+    out = {"project": proj.code}
+    if "payables" in data:
+        pay = data["payables"]
+        out["suppliers"] = [{"name": r["name"], "debt": float(r["debt"])} for r in pay["suppliers"] if r["debt"]]
+        out["teams"] = [{"name": r["name"], "debt": float(r["debt"])} for r in pay["teams"] if r["debt"]]
+        out["labor_debt"] = float(pay["labor_debt"])
+    if "customer" in data:
+        out["customer_remaining"] = float(data["customer"]["remaining"]) if data["customer"]["remaining"] is not None else None
+    return out
+
+
+def money_summary(user, code=None, start=None, end=None):
+    start, end = _range(start, end)
+    rows = entries_for(user, start, end, code)
+    totals = {k: (float(v) if isinstance(v, Decimal) else v) for k, v in money_totals(rows).items()}
+    targets = [project(user, code)] if code else projects(user)
+    return {"from": start.strftime("%d/%m/%Y"), "to": end.strftime("%d/%m/%Y"), **totals,
+            "debts": [debts(user, p) for p in targets if user.sees_payables or user.sees_receivables]}
+
+
+def list_entries(user, code=None, party=None, start=None, end=None):
+    start, end = _range(start, end)
+    return [{"id": e.pk, "date": e.date.strftime("%d/%m/%Y"), "number": e.number, "kind": e.get_kind_display(), "party": e.party,
+             "project": e.project.code if e.project_id else "", "amount": float(e.amount), "voided": bool(e.voided_at)}
+            for e in entries_for(user, start, end, code, party)[-60:]]
+
+
+def find_parties(user, name):
+    from money.parties import match
+    result = match(name)
+    found = [result["party"]] if result.get("party") else result.get("candidates", [])
+    return [{"name": p.name, "type": p.get_type_display(), "misa_code": p.misa_code} for p in found]
+
+
+def debts_text(user, code=None):
+    if not (user.sees_payables or user.sees_receivables):
+        return "Anh/chị không có quyền xem công nợ."
+    targets = [project(user, code)] if code else projects(user)
+    out = [f"CÔNG NỢ {timezone.localdate():%d/%m/%Y}"]
+    for proj in targets:
+        d = debts(user, proj)
+        lines = [f"\n{proj.code} · {proj.name}"]
+        for label, key in (("NCC", "suppliers"), ("Tổ thợ", "teams")):
+            for row in d.get(key, []):
+                lines.append(f"- {label} {row['name']}: {vnd(row['debt'])}")
+        if d.get("labor_debt"):
+            lines.append(f"- Lương công nhật còn: {vnd(d['labor_debt'])}")
+        if "customer_remaining" in d:
+            lines.append(f"- Khách còn phải trả: {vnd(d['customer_remaining'])}" if d["customer_remaining"] is not None
+                         else "- Khách: chưa có giá trị hợp đồng")
+        if len(lines) == 1:
+            lines.append("- Không còn nợ")
+        out += lines
+    out.append(f"\nXem chi tiết: {settings.APP_URL}/bao-cao/cong-no/")
+    return "\n".join(out)
+
+
+def entries_text(user, start, end):
+    rows = entries_for(user, start, end)
+    if not rows:
+        return f"Chưa có phiếu nào từ {start:%d/%m} đến {end:%d/%m/%Y}."
+    totals = money_totals(rows)
+    title = f"{start:%d/%m/%Y}" if start == end else f"{start:%d/%m} – {end:%d/%m/%Y}"
+    out = [f"THU CHI {title}"] + [f"• {entry_line(e)}" for e in rows[-30:]]
+    if len(rows) > 30:
+        out.insert(1, f"(30 phiếu gần nhất trong {len(rows)} phiếu)")
+    out.append(f"Tổng thu {vnd(totals['receipts'])} · tổng chi {vnd(totals['payments'])}"
+               + (f" · phát sinh nợ {vnd(totals['accruals'])}" if totals["accruals"] else ""))
+    out.append(f"Sổ thu chi: {settings.APP_URL}/bao-cao/thu-chi/?tu={start:%Y-%m-%d}&den={end:%Y-%m-%d}")
+    return "\n".join(out)
+
+
+def report_text(user, start, end):
+    rows = entries_for(user, start, end)
+    out = [f"BÁO CÁO {start:%d/%m} – {end:%d/%m/%Y}"]
+    by_project = {}
+    for e in rows:
+        by_project.setdefault(e.project.code if e.project_id else "Chung", []).append(e)
+    for code, items in sorted(by_project.items()):
+        t = money_totals(items)
+        out.append(f"• {code}: thu {vnd(t['receipts'])}, chi {vnd(t['payments'])}" + (f", phát sinh nợ {vnd(t['accruals'])}" if t["accruals"] else ""))
+    if not rows:
+        out.append("Chưa có phiếu nào.")
+    out.append("")
+    out.append(debts_text(user) if (user.sees_payables or user.sees_receivables) else "")
+    return "\n".join(x for x in out if x is not None).strip()

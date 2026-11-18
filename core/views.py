@@ -15,12 +15,12 @@ def shell(request):
     if user.sees_payables:
         tabs.append({"key": "field_attendance", "label": "Công", "url": reverse("field_attendance")})
     if user.sees_payables or user.sees_receivables:
-        tabs.append({"key": "reports", "label": "Báo cáo", "url": reverse("reports")})
+        tabs.append({"key": "reports", "label": "Báo cáo", "url": reverse("reports"), "match": ("reports", "money_")})
     tabs.append({"key": "account", "label": "Tài khoản", "url": reverse("account")})
     match = getattr(request, "resolver_match", None)
     current = (match.url_name or "") if match else ""
     for tab in tabs:
-        tab["active"] = current.startswith(tab["key"])
+        tab["active"] = any(current.startswith(key) for key in tab.get("match", (tab["key"],)))
     return {"tabs": tabs, "role_label": "Giám đốc" if user.is_superuser else user.get_role_display()}
 
 

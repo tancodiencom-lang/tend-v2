@@ -17,7 +17,7 @@ urlpatterns = [
     path("chat/", include("chat.urls")),
     path("yeu-cau/", include("asks.urls")),
     path("", include("field.urls")),
-    path("bao-cao/", overview_views.reports, name="reports"),
+    path("", include("money.urls")),
     path("tai-khoan/", overview_views.account, name="account"),
     path("quan-tri/", admin.site.urls),
 ]

@@ -40,11 +40,5 @@ def overview_project(request, code):
 
 @login_required
 @require_GET
-def reports(request):
-    return render(request, "overview/reports.html", {})
-
-
-@login_required
-@require_GET
 def account(request):
     return render(request, "core/account.html", {})

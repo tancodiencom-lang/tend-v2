@@ -321,3 +321,127 @@ class AskTests(BotCase):
         self.client.force_login(self.site)
         self.assertEqual(self.client.post(reverse("asks_create", args=["TN-22"]),
                                           {"item_id": item.pk, "assignee": self.site.pk, "note": "x"}).status_code, 403)
+
+
+class MoneyBotTests(BotCase):
+    def setUp(self):
+        super().setUp()
+        from money.models import Party
+        self.cat = Party.objects.create(name="Cát Hùng Vương", type="ncc")
+        self.finance = User.objects.create_user("ktt", password="x-123-abcd", role=Role.FINANCE_ACCOUNTANT)
+        Member.objects.create(project=self.project, user=self.finance)
+        self.connect(self.finance)
+        self.sent.clear()
+
+    def entries(self):
+        from money.models import Entry
+        return Entry.objects.order_by("pk")
+
+    def test_short_syntax_confirm_and_duplicate(self):
+        self.message(self.accountant, "trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng đợt 2")
+        proposal = self.proposal()
+        self.assertIn("Trả nhà cung cấp · PC12", bot.summary(proposal))
+        self.assertIn("5.000.000 ₫", bot.summary(proposal))
+        self.press(self.accountant, self.last_buttons()["✓ Xác nhận"])
+        entry = self.entries().get()
+        self.assertEqual((entry.party_ref, entry.amount, entry.method, entry.content), (self.cat, Decimal(5_000_000), "chuyen_khoan", "cát vàng đợt 2"))
+        self.assertTrue(AuditLog.objects.filter(table="money.Entry", channel="telegram").exists())
+        self.message(self.accountant, "trả NCC 1tr Cát Hùng Vương TN-22 PC12")
+        proposal = self.proposal()
+        self.assertIn("Nghi trùng", bot.summary(proposal))
+        self.assertNotIn("✓ Xác nhận", self.last_buttons(self.chats[self.accountant.pk]))
+        self.press(self.accountant, f"md:{str(proposal.pk)[:8]}:0")
+        self.press(self.accountant, f"ok:{proposal.pk}")
+        self.assertEqual(self.entries().count(), 2)
+
+    def test_new_party_near_name_and_project_choice(self):
+        other = Project.objects.create(code="BH-01", name="Biệt thự")
+        Member.objects.create(project=other, user=self.accountant)
+        self.message(self.accountant, "trả tổ 3tr Tổ điện Bình tm")
+        proposal = self.proposal()
+        short = str(proposal.pk)[:8]
+        self.assertTrue(any("chưa có trong danh sách đối tượng" in t for t in self.texts()))
+        self.assertTrue(any("thuộc công trình nào" in t for t in self.texts()))
+        self.press(self.accountant, f"mp:{short}:0:n-to")
+        self.press(self.accountant, f"mj:{short}:0:{other.pk}")
+        self.press(self.accountant, f"ok:{proposal.pk}")
+        entry = self.entries().get()
+        self.assertEqual((entry.project, entry.party_ref.name, entry.party_ref.type), (other, "Tổ điện Bình", "to"))
+        self.message(self.accountant, "trả NCC 1tr Cat Hung Vuon TN-22")
+        proposal = self.proposal()
+        self.assertTrue(any("là đối tượng nào" in t for t in self.texts()))
+        self.press(self.accountant, f"mp:{str(proposal.pk)[:8]}:0:{self.cat.pk}")
+        self.press(self.accountant, f"ok:{proposal.pk}")
+        self.assertEqual(self.entries().last().party_ref, self.cat)
+
+    def test_customer_receipt_rights_and_lookups(self):
+        Project.objects.filter(pk=self.project.pk).update(contract_value=100_000_000)
+        self.message(self.accountant, "thu khách 10tr TN-22")
+        self.assertIn("thu tiền khách do kế toán tài chính", self.texts()[-1])
+        self.message(self.finance, "thu khách 30tr TN-22 PT01 ck")
+        self.press(self.finance, f"mp:{str(self.proposal().pk)[:8]}:0:n-khach")
+        self.press(self.finance, f"ok:{self.proposal().pk}")
+        self.message(self.accountant, "nhận hàng 8tr Cát Hùng Vương TN-22")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        self.message(self.accountant, "/thuchi hôm nay")
+        self.assertIn("Cát Hùng Vương", self.texts()[-1])
+        self.assertNotIn("Khách TN-22", self.texts()[-1])
+        self.message(self.accountant, "/congno")
+        self.assertIn("NCC Cát Hùng Vương: 8.000.000 ₫", self.texts()[-1])
+        self.assertNotIn("Khách còn", self.texts()[-1])
+        self.message(self.finance, "/congno TN-22")
+        self.assertIn("Khách còn phải trả: 70.000.000 ₫", self.texts()[-1])
+        self.message(self.site, "/congno")
+        self.assertIn("không có quyền", self.texts()[-1])
+
+    def test_ai_reads_voucher_photo(self):
+        self.message(self.accountant, "", photo="phieu1")
+        reply = AiTests.tool("propose_entries", {"entries": [{"kind": "tra_ncc", "project_code": "TN-22", "number": "PC20",
+                                                              "party": "Cát Hùng Vương", "amount": 2_500_000, "method": "tien_mat",
+                                                              "photo_index": 0}]})
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "create_message", return_value=reply) as fake:
+            self.message(self.accountant, "nhập phiếu này giúp")
+        content = fake.call_args.kwargs["messages"][-1]["content"]
+        self.assertEqual(content[0]["type"], "image")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        entry = self.entries().get()
+        self.assertTrue(entry.voucher.name.startswith("chung-tu/"))
+        self.assertEqual(entry.number, "PC20")
+
+    def test_void_same_day_and_director_approval(self):
+        from money.models import Entry
+        self.message(self.accountant, "trả NCC 5tr Cát Hùng Vương TN-22 PC12")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        self.message(self.accountant, "/huy PC12 nhập nhầm số tiền")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        self.assertIsNotNone(Entry.objects.get(number="PC12").voided_at)
+        self.message(self.accountant, "trả NCC 4tr Cát Hùng Vương TN-22 PC13")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        Entry.objects.filter(number="PC13").update(created_at=timezone.now() - timedelta(days=3))
+        self.message(self.accountant, "/huy PC13 sai đối tượng")
+        self.assertIn("đã gửi Giám đốc duyệt", self.texts(self.chats[self.accountant.pk])[-1])
+        request = self.proposal()
+        self.assertTrue(any("XIN HUỶ PHIẾU" in t for t in self.texts(self.chats[self.director.pk])))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.press(self.director, f"dx:{request.pk}")
+        self.assertIsNone(Entry.objects.get(number="PC13").voided_at)
+        self.assertIn("không duyệt", self.texts(self.chats[self.accountant.pk])[-1])
+        self.message(self.accountant, "/huy PC13 sai đối tượng")
+        with self.captureOnCommitCallbacks(execute=True):
+            self.press(self.director, f"dv:{self.proposal().pk}")
+        entry = Entry.objects.get(number="PC13")
+        self.assertIsNotNone(entry.voided_at)
+        self.assertIn("đã duyệt huỷ", self.texts(self.chats[self.accountant.pk])[-1])
+        self.press(self.accountant, f"dv:{self.proposal().pk}")      # kế toán bấm nút duyệt: không có quyền
+        self.assertTrue(AuditLog.objects.filter(table="money.Entry", object_id=str(entry.pk), actor=self.director).exists())
+
+    def test_daily_summary(self):
+        from chat.money_bot import send_daily
+        self.message(self.accountant, "chi 500k tiền điện văn phòng")
+        self.press(self.accountant, f"mp:{str(self.proposal().pk)[:8]}:0:n-khac")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        self.sent.clear()
+        self.assertEqual(send_daily(), 1)
+        text = self.texts(self.chats[self.director.pk])[-1]
+        self.assertIn("TÓM TẮT THU CHI", text)
+        self.assertIn("chi 500.000 ₫", text)

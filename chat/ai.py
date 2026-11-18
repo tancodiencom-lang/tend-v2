@@ -36,7 +36,13 @@ Việc của bạn:
 4. CÂU HỎI về tiến độ, nhân công, chấm công, công nợ, lãi lỗ: gọi list_projects / project_overview / attendance_summary
    rồi trả lời ngắn bằng tiếng Việt có dấu, tiền dạng 1.250.000 ₫, ngày dd/mm/yyyy, số thập phân dấu phẩy. Chỉ nói số
    có trong kết quả công cụ; công cụ không trả mục nào thì nói người dùng không có quyền xem hoặc chưa có dữ liệu.
-5. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
+5. PHIẾU THU/CHI của kế toán (chữ hoặc ảnh phiếu thu, phiếu chi, uỷ nhiệm chi, phiếu nhập hàng): gọi propose_entries, mỗi
+   phiếu một dòng: kind (thu_khach thu tiền khách; thu_khac thu khác; hang_ncc hàng nhà cung cấp đã nhận, chưa trả;
+   tra_ncc trả nhà cung cấp; khoan_tinh giá trị khoán tổ thợ được tính; tra_to trả tổ thợ; tra_cong trả lương công
+   nhật; chi_khac chi khác), số phiếu, ngày, đối tượng (tên NCC/tổ/khách/người nhận đúng như trên phiếu), công trình
+   (mã), nội dung, số tiền (số nguyên đồng), tiền mặt hay chuyển khoản, photo_index (ảnh số mấy, nếu có ảnh). Chỉ ghi
+   số đọc rõ trên ảnh/tin; không đọc được số tiền thì ask_user. Huỷ phiếu đã ghi: propose_void (số phiếu + lý do).
+6. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
 Trả lời ngắn, tối đa khoảng 12 dòng. Không dùng Markdown phức tạp."""
 
 _OBJ = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -83,11 +89,35 @@ TOOLS = [
     {"name": "propose_answer", "description": "Lập câu trả lời bằng chữ cho một yêu cầu báo cáo.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["ask_id", "note"],
                       "properties": {"ask_id": {"type": "string"}, "note": {"type": "string"}}}},
+    {"name": "money_summary", "description": "Thu, chi, phát sinh nợ và công nợ NCC/tổ thợ/khách theo quyền người hỏi, trong "
+     "khoảng ngày (mặc định tháng này), lọc theo công trình.",
+     "input_schema": {"type": "object", "properties": {"project_code": {"type": "string"}, "start": {"type": "string"},
+                                                       "end": {"type": "string"}}, "additionalProperties": False}},
+    {"name": "list_entries", "description": "Danh sách phiếu thu chi theo quyền người hỏi (ngày, số phiếu, loại, đối tượng, "
+     "công trình, số tiền), lọc theo khoảng ngày, công trình, tên đối tượng.",
+     "input_schema": {"type": "object", "properties": {"project_code": {"type": "string"}, "party": {"type": "string"},
+                                                       "start": {"type": "string"}, "end": {"type": "string"}},
+                      "additionalProperties": False}},
+    {"name": "find_parties", "description": "Tìm đối tượng (NCC, tổ thợ, khách) gần với tên.",
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}},
+    {"name": "propose_entries", "description": "Lập phiếu thu/chi chờ người nhập bấm Xác nhận.",
+     "input_schema": {"type": "object", "additionalProperties": False, "required": ["entries"], "properties": {
+         "entries": {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                                                "required": ["kind", "party", "amount"], "properties": {
+             "kind": {"type": "string", "enum": ["thu_khach", "thu_khac", "hang_ncc", "tra_ncc", "khoan_tinh", "tra_to",
+                                                 "tra_cong", "chi_khac"]},
+             "project_code": {"type": "string"}, "date": {"type": "string", "description": "YYYY-MM-DD"},
+             "number": {"type": "string"}, "party": {"type": "string"}, "content": {"type": "string"},
+             "amount": {"type": "integer"}, "method": {"type": "string", "enum": ["tien_mat", "chuyen_khoan"]},
+             "photo_index": {"type": "integer"}}}}}}},
+    {"name": "propose_void", "description": "Xin huỷ một phiếu đã ghi (số phiếu hoặc #mã) kèm lý do.",
+     "input_schema": {"type": "object", "additionalProperties": False, "required": ["ref", "reason"],
+                      "properties": {"ref": {"type": "string"}, "reason": {"type": "string"}}}},
     {"name": "ask_user", "description": "Hỏi lại khi thiếu thông tin hoặc không chắc chi tiết/người nào.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["question"],
                       "properties": {"question": {"type": "string"}}}},
 ]
-FINAL = {'propose_report', 'propose_attendance_fix', 'propose_answer', 'ask_user'}
+FINAL = {'propose_report', 'propose_attendance_fix', 'propose_answer', 'propose_entries', 'propose_void', 'ask_user'}
 
 
 def model():
@@ -129,13 +159,38 @@ def create_message(**kwargs):
     return client.messages.create(**kwargs)
 
 
-def run(text, history, context, execute):
+def image_blocks(images):
+    """Ảnh (bytes) → khối ảnh cho Claude, thu nhỏ cạnh dài ≤ 1568 px (đủ đọc chữ trên phiếu, ít token)."""
+    import base64
+    from io import BytesIO
+
+    from PIL import Image
+    blocks = []
+    for data in images[:4]:
+        try:
+            picture = Image.open(BytesIO(data))
+            picture = picture.convert('RGB')
+            picture.thumbnail((1568, 1568))
+            out = BytesIO()
+            picture.save(out, 'JPEG', quality=85)
+        except Exception:   # ảnh hỏng: bỏ qua, AI vẫn đọc chữ
+            continue
+        blocks.append({'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/jpeg',
+                                                   'data': base64.b64encode(out.getvalue()).decode()}})
+    return blocks
+
+
+def run(text, history, context, execute, images=()):
     """Chạy vòng công cụ. `execute(name, input)` do bot cung cấp, chạy dưới quyền người dùng.
+    `images`: ảnh vừa gửi (bytes) theo thứ tự — ảnh số 0, 1, … — để AI đọc phiếu thu/chi.
 
     Trả {'type': 'final', 'tool': tên, 'input': {...}} khi AI lập phiếu/hỏi lại, {'type': 'text', 'text': ...}
     khi AI trả lời câu hỏi, hoặc None khi gọi AI lỗi.
     """
-    messages = [*history, {'role': 'user', 'content': f'{context}\n\nTin nhắn: {text}'}]
+    prompt = f'{context}\n\nTin nhắn: {text}'
+    blocks = image_blocks(images) if images else []
+    content = [*blocks, {'type': 'text', 'text': prompt}] if blocks else prompt
+    messages = [*history, {'role': 'user', 'content': content}]
     for _ in range(MAX_STEPS):
         try:
             response = create_message(model=model(), max_tokens=2000, system=[{'type': 'text', 'text': SYSTEM,

@@ -34,7 +34,7 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 1. ✓ Khung, 5 vai, nhật ký, Tổng quan 5 câu hỏi (đợt này).
 2. ✓ Bộ quy chuẩn bản vẽ + Bộ Tend cho AutoCAD + nhập DXF có lọc → bản vẽ chỉ xem; chép dữ liệu đầu từ bản cũ (chỉ đọc). Xem mục dưới.
 3. ✓ Bot giám sát: báo cáo, ảnh, lý do giảm, chấm công; bảng công tháng, chi phí công nhật. Xem mục dưới.
-4. Bot kế toán: phiếu thu/chi (chữ, ảnh phiếu), lệnh tra cứu; xuất MISA.
+4. ✓ Bot kế toán: phiếu thu/chi (chữ, ảnh phiếu), lệnh tra cứu; xuất MISA. Xem mục dưới.
 5. Báo cáo tải về (Excel).
 6. Triển khai `app.tend.vn`, chuyển bot sang; so.tend.vn chỉ tra cứu.
 
@@ -56,3 +56,11 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - AI (`chat/ai.py`, Claude Haiku 5.5, trần `TEND_AI_MONTHLY_USD`): công cụ đọc chạy dưới quyền người hỏi (`chat/reads.py`: tổng quan, chi tiết, thợ, công theo người/khoảng ngày — tiền chỉ vai xem chi phí), công cụ lập phiếu báo cáo/sửa công/trả lời. Chưa bật AI: cú pháp ngắn `chat/parse.py` (`TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ`), lệnh `/tongquan /cong /yeucau /congtrinh /suacong /dongia /ngatketnoi /trogiup`.
 - Web: Bảng công tháng `/cong/` (+ Excel, tiền theo vai), Thợ `/tho/`, ảnh qua `/anh/<id>/` có kiểm quyền công trình; bảng chi tiết trên bản vẽ hiện các lần báo (người, lý do giảm, ảnh) và cho Giám đốc **Yêu cầu báo cáo** (`asks`): người được hỏi nhận ngay qua Telegram; trả lời bằng báo cáo có chi tiết đó (tính lúc đọc) hoặc bằng chữ.
 - Chưa thử bot/Claude API thật (bài kiểm dùng Telegram giả, AI giả): chuyển bot sang bản mới ở đợt 6.
+
+## Bot kế toán, sổ thu chi, công nợ, MISA (đợt 4, 18/11/2026)
+
+- Chủ dự án chốt: **danh sách đối tượng** (`money.Party`: NCC, tổ thợ, khách, khác; mã MISA, MST) — bot so tên gần đúng (`money/parties.py`), tên mới hỏi thêm; **thu tiền khách chỉ kế toán tài chính, Giám đốc nhập**, kế toán nội bộ nhập các loại còn lại (`money.services.kinds_for`) và không xem phiếu thu khách (`visible_kinds`); **phiếu chi không cần duyệt trước**; **huỷ**: người nhập tự huỷ phiếu của mình trong ngày (chưa xuất MISA) có lý do, còn lại bot gửi Giám đốc ✓ Duyệt huỷ / × Không duyệt. Không xoá phiếu: `voided_at`, `void_reason`; phiếu huỷ không tính ở đâu (`overview.compute.live`).
+- Đường ghi `money/services.py` (`add_entries`, `void`, `add_party`, `set_party`): giao dịch + nhật ký; mã chống gửi trùng từng phiếu suy từ mã phiếu chat; nghi trùng (cùng số phiếu cùng nhóm thu/chi trong năm, hoặc cùng ngày + số tiền + đối tượng) phải bấm "Vẫn ghi". Loại cần công trình: thu khách, hàng NCC, trả NCC, khoán tổ, trả tổ.
+- Bot (`chat/money_bot.py`): cú pháp ngắn `<loại> <số tiền> <đối tượng> [TN-22] [PC12] [ck|tm] [15/11] [- nội dung]` (`chat/parse.money`), hoặc AI (Haiku đọc **ảnh phiếu**, ảnh thu nhỏ ≤ 1568 px, `propose_entries` có `photo_index`; ảnh lưu làm chứng từ `MEDIA_ROOT/chung-tu/`). Nút hỏi: đối tượng (`mp:`), công trình (`mj:`), vẫn ghi (`md:`), Giám đốc duyệt huỷ (`dv:`/`dx:`). Lệnh `/thuchi`, `/congno`, `/baocao`, `/doituong`, `/huy`. `python manage.py tom_tat_ngay` gửi Giám đốc tóm tắt thu chi + phiếu huỷ trong ngày (hẹn giờ đặt ở đợt 6).
+- Web mục **Báo cáo**: Sổ thu chi `/bao-cao/thu-chi/` (lọc, tổng thu/chi/phát sinh nợ, phiếu huỷ gạch ngang, ảnh chứng từ `/chung-tu/<id>/` có kiểm quyền, Excel), Công nợ `/bao-cao/cong-no/` (khách chỉ vai xem phải thu, Excel), Xuất MISA `/bao-cao/misa/` (`money/misa.py`, 5 mẫu ASP như bản cũ; khoán tổ không xuất; đánh dấu đã xuất, xuất lại có cảnh báo; tài khoản ở trang quản trị › Cài đặt kế toán), Đối tượng `/doi-tuong/` (sửa mã MISA, MST… có nhật ký).
+- Chưa thử Claude API đọc ảnh thật, chưa đặt hẹn giờ tóm tắt ngày (đợt 6).
