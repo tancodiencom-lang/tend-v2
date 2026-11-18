@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Kết nối Telegram{% endblock %}
+{% block content %}
+<p><a href="{% url 'account' %}">‹ Tài khoản</a></p>
+<h1>Kết nối Telegram</h1>
+{% for m in messages %}<p class="good">{{ m }}</p>{% endfor %}
+{% if not ready %}<p class="missing">Máy chủ chưa cấu hình bot Telegram.</p>{% endif %}
+<section class="box">
+{% if links %}<p>✓ Đang kết nối: {% for l in links %}<b>{{ l.display_name|default:"Telegram" }}</b> từ {{ l.linked_at|date:"d/m/Y H:i" }}{% endfor %}</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="unlink"><button class="btn plain" type="submit">Ngắt kết nối</button></form>
+{% else %}<p>Chưa kết nối. Kết nối một lần để báo cáo, chấm công và hỏi số liệu qua Telegram.</p>{% endif %}
+</section>
+<section class="box"><h2>Lấy mã kết nối</h2>
+{% if code %}<p>Mã của anh/chị (dùng một lần trong 15 phút):</p><p class="big">{{ code }}</p>
+{% if deep_link %}<p><a class="btn" href="{{ deep_link }}">Mở Telegram và kết nối</a></p>{% endif %}
+<p class="muted">Hoặc nhắn cho bot{% if bot_username %} @{{ bot_username }}{% endif %}: <b>/ketnoi {{ code }}</b></p>
+{% else %}<form method="post">{% csrf_token %}<button class="btn" type="submit">Lấy mã kết nối</button></form>{% endif %}
+</section>
+<section class="box"><h2>Cách dùng</h2>
+<p>Gửi ảnh rồi nhắn: <i>TN-22 T2.5 40%, S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ</i>. Bot lập phiếu, bấm <b>✓ Xác nhận</b> mới ghi. Gửi báo cáo là anh/chị tự có công tại công trình đó.</p>
+<p class="muted">{% if ai_ready %}Trợ lý AI đang bật: nhắn tự nhiên, hỏi số liệu bằng câu thường.{% else %}Trợ lý AI chưa bật: dùng cú pháp ngắn như trên và các lệnh /tongquan, /cong, /yeucau.{% endif %}</p>
+</section>
+{% endblock %}

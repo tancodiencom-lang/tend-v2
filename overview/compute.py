@@ -16,7 +16,7 @@ from decimal import ROUND_CEILING, Decimal
 from django.db.models import Sum
 
 from drawings.models import Item
-from field.models import Attendance, ReportLine
+from field.models import Attendance, ReportLine, Worker
 from money.models import Entry, Kind
 
 ZERO, HUNDRED = Decimal(0), Decimal(100)
@@ -135,7 +135,8 @@ def labor(project, today, user):
 
 
 def labor_cost(project, start=None, end=None):
-    rows_ = Attendance.objects.filter(project=project, worker__isnull=False).select_related("worker")
+    """Chi phí công nhật ước tính = số công × đơn giá, chỉ thợ công nhật (thợ tổ khoán đã nằm trong tiền khoán)."""
+    rows_ = Attendance.objects.filter(project=project, worker__isnull=False, worker__pay=Worker.Pay.DAILY).select_related("worker")
     if start:
         rows_ = rows_.filter(work_date__gte=start)
     if end:

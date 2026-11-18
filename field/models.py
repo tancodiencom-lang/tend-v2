@@ -61,13 +61,20 @@ class Worker(models.Model):
         SKILLED = "tho", "Thợ"
         HELPER = "phu", "Phụ"
 
+    class Pay(models.TextChoices):
+        DAILY = "cong_nhat", "Công nhật"
+        TEAM = "khoan", "Tổ khoán"
+
     name = models.CharField("Tên", max_length=100)
     team = models.CharField("Tổ", max_length=100, blank=True)
     kind = models.CharField("Loại", max_length=4, choices=Kind.choices, default=Kind.SKILLED)
     phone = models.CharField("Điện thoại", max_length=20, blank=True)
     day_rate = models.DecimalField("Đơn giá ngày công (₫)", max_digits=12, decimal_places=0, null=True, blank=True,
                                    help_text="Chỉ Giám đốc, kế toán xem và sửa.")
+    pay = models.CharField("Hình thức trả", max_length=10, choices=Pay.choices, default=Pay.DAILY,
+                           help_text="Tổ khoán: vẫn chấm công để biết số người, tiền nằm ở khoản khoán nên không tính công nhật.")
     active = models.BooleanField("Đang làm", default=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         verbose_name = "Thợ"

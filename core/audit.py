@@ -4,6 +4,7 @@ Mọi chỗ ghi (web, bot, lệnh) gọi `record_save` / `record_delete`, không
 """
 import threading
 from decimal import Decimal
+from uuid import UUID
 
 from django.conf import settings
 from django.db import transaction
@@ -36,7 +37,7 @@ def client_ip():
 
 
 def _plain(value):
-    if isinstance(value, Decimal):
+    if isinstance(value, (Decimal, UUID)):
         return str(value)
     if hasattr(value, "isoformat"):
         return value.isoformat()

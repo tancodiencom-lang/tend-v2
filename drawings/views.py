@@ -15,6 +15,10 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods
 
+from asks.models import Ask
+from asks.services import status as ask_status
+from core.text import vn_number
+from field.models import ReportLine
 from overview.compute import rows as progress_rows
 from projects.models import projects_for
 
@@ -99,14 +103,16 @@ def view(request, code):
                   key=lambda r: (GROUP_ORDER[_group(r.item)], r.item.code))
     size = max(drawing.view_box[2], drawing.view_box[3]) if len(drawing.view_box) == 4 else 10000
     shapes, info = [], []
+    history = _history([r.item for r in data])
+    open_asks = _open_asks(project)
     for index, row in enumerate(data):
         item = row.item
         percent = row.percent_at(today)
         css, label = _status(percent)
-        history = [{"date": when.strftime("%d/%m/%Y"), "percent": f"{pct:.0f}"} for when, pct in row.history[-6:]]
-        info.append({"code": item.code, "work": item.work, "location": item.location, "unit": item.unit,
-                     "quantity": f"{item.design_quantity.normalize():f}".replace(".", ","), "note": item.note,
-                     "percent": f"{percent:.0f}", "status": label, "history": history})
+        info.append({"id": item.pk, "code": item.code, "work": item.work, "location": item.location, "unit": item.unit,
+                     "quantity": vn_number(item.design_quantity), "note": item.note,
+                     "percent": f"{percent:.0f}", "status": label, "history": history.get(item.pk, [])[-6:],
+                     "asks": open_asks.get(item.pk, [])})
         d, (lx, ly), kind = _svg(item.geometry, size / 120)
         shapes.append({"i": index, "css": css, "kind": kind, "d": d, "code": item.code, "lx": lx, "ly": ly,
                        "mark": label[0], "label": kind == "polygon" and _group(item) in LABELLED, "group": _group(item)})
@@ -115,7 +121,40 @@ def view(request, code):
         "box": " ".join(f"{v:g}" for v in drawing.view_box), "label_size": f"{size / 32:g}",
         "ratio": f"{drawing.view_box[2]:g} / {drawing.view_box[3]:g}" if len(drawing.view_box) == 4 else "4 / 3",
         "groups": [(key, title) for key, title, _ in GROUPS if any(s["group"] == key for s in shapes)],
-        "can_import": request.user.edits_drawings})
+        "can_import": request.user.edits_drawings, "asks": _asks_for(request.user, project),
+        "can_ask": request.user.is_director,
+        "assignees": [m.user for m in project.members.filter(active=True, user__is_active=True).select_related("user")]})
+
+
+def _history(items):
+    """Các lần báo của từng chi tiết: ngày, người, giá trị, lý do giảm, ảnh (đường xem có kiểm quyền)."""
+    out = {}
+    lines = (ReportLine.objects.filter(item__in=items).select_related("report__author", "item")
+             .prefetch_related("photos").order_by("report__work_date", "report__created_at", "pk"))
+    for line in lines:
+        value = (f"{vn_number(line.percent)}%" if line.percent is not None else f"{vn_number(line.quantity)} {line.item.unit}")
+        out.setdefault(line.item_id, []).append({
+            "date": line.report.work_date.strftime("%d/%m/%Y"), "percent": value, "author": str(line.report.author),
+            "reason": line.decrease_reason, "note": line.note,
+            "photos": [reverse("field_photo", args=[p.pk]) for p in line.photos.all()]})
+    return out
+
+
+def _open_asks(project):
+    out = {}
+    for ask in Ask.objects.filter(project=project, cancelled_at__isnull=True).prefetch_related("items").select_related("assignee"):
+        state, label = ask_status(ask)
+        if state in ("open", "late"):
+            for item in ask.items.all():
+                out.setdefault(item.pk, []).append(f"{label} · {ask.assignee}: {ask.note}")
+    return out
+
+
+def _asks_for(user, project):
+    rows = Ask.objects.filter(project=project).select_related("assignee", "requester").prefetch_related("items")
+    if not user.is_director:
+        rows = rows.filter(assignee=user)
+    return [{"ask": a, "status": ask_status(a)} for a in rows[:20]]
 
 
 def _quantity_rows(request, project):

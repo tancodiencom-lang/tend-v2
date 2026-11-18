@@ -88,14 +88,28 @@
     svg.querySelectorAll(".it.sel").forEach(function (n) { n.classList.remove("sel"); });
     var shape = svg.querySelector('[data-i="' + i + '"]');
     if (shape) shape.classList.add("sel");
-    var rows = x.history.length ? x.history.map(function (h) { return "<li><span>" + esc(h.date) + "</span><span>" + esc(h.percent) + "%</span></li>"; }).join("")
-      : '<li><span class="missing">Chưa có báo cáo</span></li>';
+    var rows = x.history.length ? x.history.slice().reverse().map(function (h) {
+      var photos = h.photos.length ? '<div class="photos">' + h.photos.map(function (u) {
+        return '<a href="' + esc(u) + '" target="_blank" rel="noopener"><img src="' + esc(u) + '" alt="Ảnh ' + esc(x.code) + " " + esc(h.date) + '" loading="lazy"></a>';
+      }).join("") + "</div>" : "";
+      return "<li><span>" + esc(h.date) + " · " + esc(h.author) + (h.reason ? '<br><small class="muted">Lý do giảm: ' + esc(h.reason) + "</small>" : "") +
+        (h.note ? '<br><small class="muted">' + esc(h.note) + "</small>" : "") + photos + "</span><span>" + esc(h.percent) + "</span></li>";
+    }).join("") : '<li><span class="missing">Chưa có báo cáo</span></li>';
+    var asks = x.asks.length ? "<h3>Đang hỏi</h3><ul class=\"lines\">" + x.asks.map(function (a) { return "<li><span>" + esc(a) + "</span></li>"; }).join("") + "</ul>" : "";
     panel.innerHTML = "<h2>" + esc(x.code) + " · " + esc(x.work) + "</h2>" +
       (x.location ? "<p>" + esc(x.location) + "</p>" : "") +
       "<p><b>" + esc(x.status) + " " + esc(x.percent) + "%</b> · thiết kế " + esc(x.quantity) + " " + esc(x.unit) + "</p>" +
-      (x.note ? '<p class="muted">' + esc(x.note) + "</p>" : "") +
+      (x.note ? '<p class="muted">' + esc(x.note) + "</p>" : "") + asks +
       "<h3>Các lần báo</h3><ul class=\"lines\">" + rows + "</ul>" +
       '<p class="muted">Báo cáo, sửa số: nhắn bot Tend trên Telegram, ghi mã ' + esc(x.code) + ".</p>";
+    var form = document.getElementById("ask-form");
+    if (form) {
+      var box = document.createElement("div");
+      box.innerHTML = "<h3>Yêu cầu báo cáo " + esc(x.code) + "</h3>";
+      box.appendChild(form.content.cloneNode(true));
+      box.querySelector("[name=item_id]").value = x.id;
+      panel.appendChild(box);
+    }
   }
   document.querySelectorAll("[data-pick]").forEach(function (b) {
     b.addEventListener("click", function () { pick(Number(b.getAttribute("data-pick"))); panel.scrollIntoView({ block: "nearest" }); });

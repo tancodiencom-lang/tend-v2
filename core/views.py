@@ -12,6 +12,8 @@ def shell(request):
     tabs = [{"key": "overview", "label": "Tổng quan", "url": reverse("overview")}]
     if user.is_director or user.role in ("supervisor", "designer"):
         tabs.append({"key": "drawings", "label": "Bản vẽ", "url": reverse("drawings_index")})
+    if user.sees_payables:
+        tabs.append({"key": "field_attendance", "label": "Công", "url": reverse("field_attendance")})
     if user.sees_payables or user.sees_receivables:
         tabs.append({"key": "reports", "label": "Báo cáo", "url": reverse("reports")})
     tabs.append({"key": "account", "label": "Tài khoản", "url": reverse("account")})

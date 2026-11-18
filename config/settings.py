@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "money",
     "asks",
     "overview",
+    "chat",
 ]
 
 MIDDLEWARE = [
@@ -90,6 +91,7 @@ if not DEBUG:
 APP_URL = env("APP_URL", default="https://app.tend.vn").rstrip("/")
 TELEGRAM_TOKEN = env("TELEGRAM_TOKEN", default="")
 TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
+TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
 TEND_AI_MODEL = env("TEND_AI_MODEL", default="claude-haiku-5-5")
 TEND_AI_MONTHLY_USD = env.float("TEND_AI_MONTHLY_USD", default=4.0)
 

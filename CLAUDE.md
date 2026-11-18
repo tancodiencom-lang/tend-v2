@@ -33,7 +33,7 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 
 1. ✓ Khung, 5 vai, nhật ký, Tổng quan 5 câu hỏi (đợt này).
 2. ✓ Bộ quy chuẩn bản vẽ + Bộ Tend cho AutoCAD + nhập DXF có lọc → bản vẽ chỉ xem; chép dữ liệu đầu từ bản cũ (chỉ đọc). Xem mục dưới.
-3. Bot giám sát: báo cáo, ảnh, lý do giảm, chấm công; bảng công tháng, chi phí công nhật.
+3. ✓ Bot giám sát: báo cáo, ảnh, lý do giảm, chấm công; bảng công tháng, chi phí công nhật. Xem mục dưới.
 4. Bot kế toán: phiếu thu/chi (chữ, ảnh phiếu), lệnh tra cứu; xuất MISA.
 5. Báo cáo tải về (Excel).
 6. Triển khai `app.tend.vn`, chuyển bot sang; so.tend.vn chỉ tra cứu.
@@ -46,3 +46,13 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - **Nhập lại**: chỉ đụng tầng có trong tệp; chi tiết trùng hình (IoU ≥ 50%, cùng layer) giữ mã; chi tiết cũ đã có báo cáo thì giữ và cảnh báo; chưa có báo cáo thì thôi dùng (`active=False`), không xoá. Đơn giá chi tiết mới lấy từ công trình gần nhất cùng công việc + đơn vị.
 - **Xem**: bản vẽ chỉ xem (lớp bật/tắt, phóng/kéo, chạm xem % và các lần báo; ký hiệu ○ ◐ ✓ kèm chữ). Bảng khối lượng + Excel; giá bán chỉ vai xem phải thu, giá vốn chỉ vai xem phải trả.
 - **Chép từ bản cũ**: `python manage.py chep_ban_cu --nguon <URL CSDL cũ>` (xem trước) rồi `--thuc-hien --nguoi <giám đốc>`. Đọc bản cũ chỉ đọc; chép tài khoản (giữ mật khẩu, không ghi băm vào nhật ký), công trình, người được giao, nền bản vẽ, chi tiết + đơn giá dự toán; không chép báo cáo/ảnh/tiền → tiến độ 0. Vai Bán hàng/Kế toán bán hàng chưa có ở bản mới: bỏ qua, có cảnh báo. Chạy lại bỏ qua phần đã có.
+
+## Bot giám sát và chấm công (đợt 3, 18/11/2026)
+
+- Chủ dự án chốt: **8 giờ = 1 công**; tên thợ mới giám sát thêm qua bot (bot hỏi thợ/phụ, gợi ý tên gần giống); đơn giá ngày công và hình thức trả (công nhật / tổ khoán) sửa ở **cả** trang web Thợ và lệnh bot `/dongia`, chỉ Giám đốc và kế toán nội bộ.
+- Mô-đun `chat/` (viết lại gọn từ `tend-app/chatbot`): kết nối mã một lần (Tài khoản › Kết nối Telegram), chỉ tin riêng, chống lặp `update_id`, webhook `/chat/telegram/<bí mật>/` kiểm đường dẫn + header, chuỗi bí mật tự suy từ `TELEGRAM_TOKEN`. Phiếu (`Proposal`) chỉ có nút ✓ Xác nhận khi đủ: ảnh đã rõ chi tiết (không đoán theo thứ tự), báo giảm có lý do, mọi tên thợ đã rõ người hoặc chọn thêm mới, sửa số công có lý do. Hết 24 giờ hoặc × Bỏ thì không ghi. Bot nhắn Giám đốc tóm tắt mỗi báo cáo.
+- Đường ghi duy nhất `field/services.py` (`submit_report`, `set_attendance`, `correct_attendance`, `add_worker`, `set_worker`): một giao dịch, nhật ký kênh `telegram`/`web`, gửi lại cùng mã phiếu không ghi trùng. Giám sát gửi báo cáo là có mặt tại công trình đó (một lượt mỗi công trình/ngày); chấm thợ trùng cùng số công thì giữ nguyên.
+- Chi phí công nhật (`overview.compute.labor_cost`, Bảng công) **chỉ tính thợ công nhật**; thợ tổ khoán vẫn chấm công để biết số người. Giám sát: Bảng công tách "có mặt" (lượt theo công trình) và "ngày làm" (số ngày khác nhau).
+- AI (`chat/ai.py`, Claude Haiku 5.5, trần `TEND_AI_MONTHLY_USD`): công cụ đọc chạy dưới quyền người hỏi (`chat/reads.py`: tổng quan, chi tiết, thợ, công theo người/khoảng ngày — tiền chỉ vai xem chi phí), công cụ lập phiếu báo cáo/sửa công/trả lời. Chưa bật AI: cú pháp ngắn `chat/parse.py` (`TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ`), lệnh `/tongquan /cong /yeucau /congtrinh /suacong /dongia /ngatketnoi /trogiup`.
+- Web: Bảng công tháng `/cong/` (+ Excel, tiền theo vai), Thợ `/tho/`, ảnh qua `/anh/<id>/` có kiểm quyền công trình; bảng chi tiết trên bản vẽ hiện các lần báo (người, lý do giảm, ảnh) và cho Giám đốc **Yêu cầu báo cáo** (`asks`): người được hỏi nhận ngay qua Telegram; trả lời bằng báo cáo có chi tiết đó (tính lúc đọc) hoặc bằng chữ.
+- Chưa thử bot/Claude API thật (bài kiểm dùng Telegram giả, AI giả): chuyển bot sang bản mới ở đợt 6.

@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% load tend %}{% block title %}Thợ{% endblock %}
+{% block content %}
+<h1>Thợ</h1>
+{% for m in messages %}<p class="{% if m.tags == 'error' %}bad{% else %}good{% endif %}">{{ m }}</p>{% endfor %}
+<p class="muted">Giám sát thêm thợ mới qua bot khi chấm công. {% if can_edit %}Sửa đơn giá, tổ, hình thức trả ở đây hoặc nhắn bot <b>/dongia Hùng 450000 khoán</b>. Thợ tổ khoán vẫn chấm công nhưng không tính tiền công nhật.{% endif %}</p>
+<div class="cards">{% for r in rows %}{% with w=r.worker %}
+<section class="card worker{% if not w.active %} off{% endif %}"><header><b>{{ w.name }}</b><span class="muted">{{ r.month|num }} công tháng {{ first|date:"m/Y" }}</span></header>
+{% if can_edit %}<form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="id" value="{{ w.pk }}">
+  <label>Tổ <input type="text" name="team" value="{{ w.team }}"></label>
+  <label>Loại <select name="kind">{% for v, l in kinds %}<option value="{{ v }}"{% if v == w.kind %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <label>Hình thức <select name="pay">{% for v, l in pays %}<option value="{{ v }}"{% if v == w.pay %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <label>Đơn giá ngày công (₫) <input type="text" inputmode="numeric" name="day_rate" value="{% if w.day_rate is not None %}{{ w.day_rate|num }}{% endif %}" placeholder="chưa có"></label>
+  <label class="check"><input type="checkbox" name="active" value="1"{% if w.active %} checked{% endif %}> Đang làm</label>
+  <button class="btn" type="submit">Lưu</button>
+</form>{% else %}<p>{{ w.team|default:"Chưa có tổ" }} · {{ w.get_kind_display }} · {{ w.get_pay_display }}{% if money %} · {{ w.day_rate|vnd|default:"chưa có đơn giá" }}{% endif %}{% if not w.active %} · đã nghỉ{% endif %}</p>{% endif %}
+</section>{% endwith %}{% empty %}<p class="missing">Chưa có thợ. Giám sát chấm công qua bot là có danh sách.</p>{% endfor %}</div>
+{% endblock %}

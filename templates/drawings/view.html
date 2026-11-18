@@ -22,6 +22,12 @@
 <aside class="box" data-panel aria-live="polite"><p class="muted">Chạm một chi tiết trên bản vẽ hoặc trong danh sách để xem.</p></aside></div>
 <section class="box"><h2>Chi tiết {{ drawing.floor }}</h2><ul class="lines">{% for x in info %}
   <li><button type="button" class="link" data-pick="{{ forloop.counter0 }}">{{ x.code }} · {{ x.work }}</button><span>{{ x.status }} {{ x.percent }}%</span></li>{% endfor %}</ul></section>
+{% if asks %}<section class="box"><h2>Yêu cầu báo cáo</h2><ul class="lines">{% for a in asks %}<li><span>{% for i in a.ask.items.all %}{{ i.code }} {% endfor %}· {{ a.ask.note }}<br><small class="muted">{{ a.ask.requester }} hỏi {{ a.ask.assignee }} · {{ a.ask.created_at|date:"d/m/Y" }}{% if a.ask.due %} · hạn {{ a.ask.due|date:"d/m/Y" }}{% endif %}</small></span><span>{{ a.status.1 }}</span></li>{% endfor %}</ul></section>{% endif %}
+{% if can_ask %}<template id="ask-form"><form method="post" action="{% url 'asks_create' project.code %}" class="row-form ask">{% csrf_token %}<input type="hidden" name="item_id">
+  <label>Hỏi ai <select name="assignee" required>{% for u in assignees %}<option value="{{ u.pk }}">{{ u }} · {{ u.get_role_display }}</option>{% endfor %}</select></label>
+  <label>Cần báo cáo gì <input type="text" name="note" required maxlength="2000" placeholder="vd: chụp ảnh mạch vữa, báo % xong"></label>
+  <label>Hạn <input type="date" name="due"></label>
+  <button class="btn" type="submit">Gửi yêu cầu</button></form></template>{% endif %}
 {{ info|json_script:"plan-info" }}
 <script src="{% static 'drawings/ban-ve.js' %}" defer></script>
 {% endif %}
