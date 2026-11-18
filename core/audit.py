@@ -49,8 +49,12 @@ def _plain(value):
     return value
 
 
+SECRET_FIELDS = {"password"}
+
+
 def snapshot(obj):
-    return {k: _plain(v) for k, v in model_to_dict(obj).items()}
+    """Giá trị các trường để ghi nhật ký; không bao giờ ghi mật khẩu (kể cả bản băm)."""
+    return {k: _plain(v) for k, v in model_to_dict(obj).items() if k not in SECRET_FIELDS}
 
 
 @transaction.atomic

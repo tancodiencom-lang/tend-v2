@@ -1,5 +1,5 @@
 """Tài khoản theo 5 vai và nhật ký thay đổi chỉ thêm (không sửa, không xoá)."""
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
 
 
@@ -11,7 +11,14 @@ class Role(models.TextChoices):
     FINANCE_ACCOUNTANT = "finance", "Kế toán tài chính"
 
 
+class Manager(UserManager):
+    def create_superuser(self, username, email=None, password=None, **extra):
+        extra.setdefault("role", Role.DIRECTOR)
+        return super().create_superuser(username, email, password, **extra)
+
+
 class User(AbstractUser):
+    objects = Manager()
     role = models.CharField("Vai", max_length=12, choices=Role.choices, default=Role.SUPERVISOR)
     phone = models.CharField("Điện thoại", max_length=20, blank=True)
 
