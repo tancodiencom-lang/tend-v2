@@ -1,9 +1,0 @@
-[Unit]
-Description=Tom tat thu chi cuoi ngay luc 18:13
-
-[Timer]
-OnCalendar=*-*-* 18:13:00
-Persistent=false
-
-[Install]
-WantedBy=timers.target

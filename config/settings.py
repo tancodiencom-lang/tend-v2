@@ -84,8 +84,6 @@ SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
-# HSTS và chuyển http → https do Caddy làm (ha-tang/app.tend.vn.caddy), không lặp ở Django.
-SILENCED_SYSTEM_CHECKS = ["security.W004", "security.W008"]
 if not DEBUG:
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if BEHIND_PROXY else None
