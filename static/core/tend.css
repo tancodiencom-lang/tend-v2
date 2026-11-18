@@ -1,0 +1,25 @@
+/* Tend mới: một tệp CSS, chữ to, chạm dễ trên điện thoại. Trạng thái luôn có ký hiệu + chữ, không chỉ màu. */
+:root{--bg:#f3f4f0;--card:#fff;--ink:#1f2a25;--muted:#56635d;--line:#d7ded3;--accent:#25463c;--bad:#9b2c1c;--good:#1f5f8b;--warn:#6b5a2e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.page{max-width:1100px;margin:0 auto;padding:16px 16px 96px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:0 0 8px}h3{font-size:15px;margin:12px 0 4px}
+p{margin:4px 0}.muted{color:var(--muted)}.bad{color:var(--bad);font-weight:600}.good{color:var(--good);font-weight:600}.missing{color:var(--warn)}
+a{color:var(--accent)}
+.tabs{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--accent);padding-bottom:env(safe-area-inset-bottom)}
+.tabs a{flex:1;text-align:center;color:#e9efe9;text-decoration:none;padding:14px 4px;min-height:52px;font-weight:600}
+.tabs a[aria-current=page]{background:#30584c;color:#fff;box-shadow:inset 0 3px 0 #e2a35b}
+.sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin:12px 0}
+.sum div,.card,.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.sum span{display:block;font-size:13px;color:var(--muted)}.sum b{font-size:20px}
+.cards{display:grid;gap:10px}.card{display:block;color:inherit;text-decoration:none}
+.card header{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.card dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px 14px;margin:0}
+.card dt{font-size:12px;color:var(--muted);text-transform:uppercase}.card dd{margin:2px 0 0}
+.box{margin-top:12px}.big{font-size:26px;font-weight:700;display:block}
+.lines{list-style:none;margin:6px 0 0;padding:0}.lines li{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid #eef1ec}
+.lines li span:last-child{text-align:right;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;text-decoration:none;font:inherit;font-weight:600;cursor:pointer}
+.btn.plain{background:#fff;color:var(--accent)}
+form p{margin:10px 0}input[type=text],input[type=password]{width:100%;min-height:44px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px}
+@media (max-width:480px){.lines li{flex-direction:column;gap:0}.lines li span:last-child{text-align:left;white-space:normal}}

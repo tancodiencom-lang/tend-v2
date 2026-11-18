@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% load tend %}{% block title %}{{ project.code }}{% endblock %}
+{% block content %}{% with p=data.progress lab=data.labor pay=data.payables cus=data.customer pro=data.profit %}
+<p><a href="{% url 'overview' %}">‹ Tổng quan</a></p>
+<h1>{{ project }}</h1>
+<p class="muted">Số liệu đến {{ today|date:"d/m/Y" }}</p>
+
+<section class="box"><h2>1. Tiến độ hiện tại</h2>
+{% if p.actual is not None %}<span class="big">{{ p.actual|pct }}</span>
+<p>{% if p.planned is not None %}Kế hoạch đến hôm nay {{ p.planned|pct }} · {% if p.gap < -2 %}<span class="bad">▼ chậm</span>{% elif p.gap > 2 %}<span class="good">▲ nhanh</span>{% else %}● đúng kế hoạch{% endif %}{% endif %}</p>
+<p class="muted">{{ p.reported }}/{{ p.item_count }} chi tiết đã có báo cáo</p>
+{% else %}<p class="missing">{{ p.missing }}</p>{% endif %}
+<h3>Nhân công</h3>
+{% if lab.latest_date %}<p>Ngày {{ lab.latest_date|date:"d/m/Y" }}: <b>{{ lab.total|num }} công</b> · 7 ngày: {{ lab.week_total|num }} công</p>
+<ul class="lines">{% for x in lab.people %}<li><span>{{ x.name }} <small class="muted">{{ x.team }}</small></span><span>{{ x.days|num }} công</span></li>{% endfor %}</ul>
+{% else %}<p class="missing">Chưa có chấm công 7 ngày gần nhất</p>{% endif %}
+{% if lab.cost is not None %}<p>Chi phí công nhật ước tính (từ đầu công trình): <b>{{ lab.cost|vnd }}</b>{% if lab.missing_rates %} <span class="missing">· chưa có đơn giá: {{ lab.missing_rates|join:", " }}</span>{% endif %}</p>{% endif %}
+</section>
+
+<section class="box"><h2>2. Tiến độ dự kiến</h2>
+{% if p.forecast %}<span class="big">{{ p.forecast|date:"d/m/Y" }}</span><p class="muted">dự kiến xong theo tốc độ 14 ngày gần nhất</p>{% elif p.actual is not None %}<p class="missing">Chưa đủ báo cáo để dự báo ngày xong</p>{% endif %}
+{% if p.target %}<p>Hẹn bàn giao {{ p.target|date:"d/m/Y" }}{% if p.late is not None %} · {% if p.late > 0 %}<span class="bad">▼ trễ {{ p.late }} ngày</span>{% else %}<span class="good">● kịp hẹn</span>{% endif %}{% endif %}</p>{% else %}<p class="missing">Chưa ghi ngày bàn giao</p>{% endif %}
+{% if p.overdue %}<h3>Quá hạn kế hoạch</h3><ul class="lines">{% for x in p.overdue %}<li><span>{{ x.code }} · {{ x.work }}</span><span class="bad">{{ x.percent|pct }} · quá {{ x.days }} ngày</span></li>{% endfor %}</ul>{% endif %}
+</section>
+
+{% if pay %}<section class="box"><h2>3. Công nợ nhà cung cấp, tổ thợ, công nhật</h2>
+<p>Nhà cung cấp: <b>{{ pay.supplier_debt|vnd }}</b></p>
+{% if pay.suppliers %}<ul class="lines">{% for s in pay.suppliers %}<li><span>{{ s.name }}</span><span>nhận {{ s.goods|vnd }} · trả {{ s.paid|vnd }} · còn {{ s.debt|vnd }}</span></li>{% endfor %}</ul>{% endif %}
+<p>Tổ thợ (khoán): <b>{{ pay.team_debt|vnd }}</b></p>
+{% if pay.teams %}<ul class="lines">{% for s in pay.teams %}<li><span>{{ s.name }}</span><span>được tính {{ s.work|vnd }} · trả {{ s.paid|vnd }} · còn {{ s.debt|vnd }}</span></li>{% endfor %}</ul>{% endif %}
+<p>Lương công nhật: ước tính {{ pay.labor_accrued|vnd }} · đã trả {{ pay.labor_paid|vnd }} · còn <b>{{ pay.labor_debt|vnd }}</b></p>
+</section>{% endif %}
+
+{% if cus %}<section class="box"><h2>4. Công nợ với khách hàng</h2>
+{% if cus.remaining is not None %}<span class="big">{{ cus.remaining|vnd }}</span><p>Hợp đồng {{ cus.contract|vnd }} · đã thu {{ cus.received|vnd }}</p>{% else %}<p class="missing">Chưa có giá trị hợp đồng</p>{% endif %}
+</section>{% endif %}
+
+{% if pro %}<section class="box"><h2>5. Dự báo lãi lỗ</h2>
+{% if pro.forecast is not None %}<span class="big{% if pro.forecast < 0 %} bad{% endif %}">{% if pro.forecast < 0 %}Lỗ {{ pro.forecast|absval|vnd }}{% else %}Lãi {{ pro.forecast|vnd }}{% endif %}</span><p class="muted">{{ pro.ratio|pct }} giá trị hợp đồng</p>
+{% else %}<p class="missing">{% if pro.missing_cost %}Chưa dự báo được: {{ pro.missing_cost }} chi tiết chưa có giá vốn{% else %}Chưa đủ dữ liệu{% endif %}</p>{% endif %}
+<ul class="lines">
+  <li><span>Doanh thu (hợp đồng)</span><span>{{ pro.revenue|vnd|default:"—" }}</span></li>
+  <li><span>− Chi phí đã phát sinh (hàng NCC, khoán, công nhật, chi khác)</span><span>{{ pro.incurred|vnd }}</span></li>
+  <li><span>− Giá vốn phần việc còn lại</span><span>{{ pro.remaining_cost|vnd }}</span></li>
+</ul>
+</section>{% endif %}
+{% endwith %}{% endblock %}

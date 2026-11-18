@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block title %}Tài khoản{% endblock %}
+{% block content %}
+<h1>{{ user }}</h1>
+<p class="muted">{{ role_label }}</p>
+<section class="box">
+  <h2>Nhập liệu qua chat</h2>
+  <p>Báo cáo hiện trường, chấm công, phiếu thu chi: nhắn bot Telegram của công ty. Bot lập phiếu, anh/chị bấm Xác nhận mới ghi.</p>
+</section>
+<section class="box">
+  {% if user.is_staff %}<p><a href="{% url 'admin:index' %}">Thiết lập (tài khoản, công trình, thợ)</a></p>{% endif %}
+  <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn plain" type="submit">Đăng xuất</button></form>
+</section>
+{% endblock %}

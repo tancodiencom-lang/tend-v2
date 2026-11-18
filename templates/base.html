@@ -1,0 +1,13 @@
+{% load static %}<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{% block title %}Tend{% endblock %} · Tân Cổ Điển</title>
+  <link rel="stylesheet" href="{% static 'core/tend.css' %}">
+</head>
+<body>
+  <main class="page">{% block content %}{% endblock %}</main>
+  {% if tabs %}<nav class="tabs" aria-label="Mục chính">{% for t in tabs %}<a href="{{ t.url }}"{% if t.active %} aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor %}</nav>{% endif %}
+</body>
+</html>

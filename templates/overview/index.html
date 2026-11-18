@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% load tend %}{% block title %}Tổng quan{% endblock %}
+{% block content %}
+<h1>Tổng quan</h1>
+<p class="muted">Ngày {{ today|date:"d/m/Y" }} · {{ rows|length }} công trình đang thi công</p>
+{% if totals.supplier is not None or totals.customer is not None or totals.profit is not None %}
+<div class="sum">
+  {% if totals.supplier is not None %}<div><span>Nợ nhà cung cấp</span><b>{{ totals.supplier|vnd }}</b></div>{% endif %}
+  {% if totals.team is not None %}<div><span>Nợ tổ thợ (khoán)</span><b>{{ totals.team|vnd }}</b></div>{% endif %}
+  {% if totals.labor is not None %}<div><span>Nợ lương công nhật</span><b>{{ totals.labor|vnd }}</b></div>{% endif %}
+  {% if totals.customer is not None %}<div><span>Khách còn phải trả</span><b>{{ totals.customer|vnd }}</b></div>{% endif %}
+  {% if totals.profit is not None %}<div><span>Lãi dự báo</span><b{% if totals.profit < 0 %} class="bad"{% endif %}>{% if totals.profit < 0 %}Lỗ {{ totals.profit|absval|vnd }}{% else %}{{ totals.profit|vnd }}{% endif %}</b></div>{% endif %}
+</div>
+{% endif %}
+{% if not rows %}<p class="box">Chưa có công trình được giao.</p>{% endif %}
+<div class="cards">
+{% for row in rows %}{% with p=row.data.progress pay=row.data.payables cus=row.data.customer pro=row.data.profit %}
+<a class="card" href="{% url 'overview_project' row.project.code %}" data-project="{{ row.project.code }}">
+  <header><strong>{{ row.project }}</strong>{% if row.data.labor.latest_date %}<span class="muted">{{ row.data.labor.total|num }} công ngày {{ row.data.labor.latest_date|date:"d/m" }}</span>{% endif %}</header>
+  <dl>
+    <div><dt>Tiến độ hiện tại</dt><dd>{% if p.actual is not None %}<b>{{ p.actual|pct }}</b>{% if p.gap is not None %} {% if p.gap < -2 %}<span class="bad">▼ chậm</span>{% elif p.gap > 2 %}<span class="good">▲ nhanh</span>{% else %}● đúng kế hoạch{% endif %}{% endif %}{% else %}<span class="missing">{{ p.missing }}</span>{% endif %}</dd></div>
+    <div><dt>Tiến độ dự kiến</dt><dd>{% if p.forecast %}Xong khoảng {{ p.forecast|date:"d/m/Y" }}{% if p.late is not None and p.late > 0 %} <span class="bad">▼ trễ {{ p.late }} ngày</span>{% endif %}{% elif p.actual is not None %}Chưa đủ báo cáo để dự báo{% else %}—{% endif %}</dd></div>
+    {% if pay %}<div><dt>Nợ NCC · tổ · công nhật</dt><dd>{{ pay.supplier_debt|vnd }} · {{ pay.team_debt|vnd }} · {{ pay.labor_debt|vnd }}</dd></div>{% endif %}
+    {% if cus %}<div><dt>Khách còn phải trả</dt><dd>{% if cus.remaining is not None %}<b>{{ cus.remaining|vnd }}</b>{% else %}<span class="missing">Chưa có giá trị hợp đồng</span>{% endif %}</dd></div>{% endif %}
+    {% if pro %}<div><dt>Lãi lỗ dự báo</dt><dd>{% if pro.forecast is not None %}<b{% if pro.forecast < 0 %} class="bad"{% endif %}>{% if pro.forecast < 0 %}Lỗ {{ pro.forecast|absval|vnd }}{% else %}Lãi {{ pro.forecast|vnd }}{% endif %}</b>{% else %}<span class="missing">{% if pro.missing_cost %}Thiếu giá vốn {{ pro.missing_cost }} chi tiết{% else %}Chưa đủ dữ liệu{% endif %}</span>{% endif %}</dd></div>{% endif %}
+  </dl>
+</a>
+{% endwith %}{% endfor %}
+</div>
+{% endblock %}

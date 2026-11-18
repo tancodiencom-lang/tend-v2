@@ -1,0 +1,3 @@
+# Chỉ cài trên máy chủ Linux (cùng với requirements.txt)
+gunicorn>=23,<24
+psycopg[binary]>=3.2,<4
