@@ -268,7 +268,7 @@ def confirm_void(proposal, user, approver=None):
 def director_decide(link_row, proposal_id, approve):
     if not link_row.user.is_director:
         return "Chỉ Giám đốc duyệt huỷ phiếu."
-    proposal = (Proposal.objects.select_for_update().filter(pk=proposal_id, kind=Proposal.Kind.VOID)
+    proposal = (Proposal.objects.select_for_update(of=("self",)).filter(pk=proposal_id, kind=Proposal.Kind.VOID)
                 .select_related("link__user").first())
     if proposal is None:
         return "Không thấy yêu cầu huỷ."
