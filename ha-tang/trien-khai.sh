@@ -5,6 +5,8 @@
 # Boc trong { ... } de bash doc het tep truoc khi chay (git pull co the thay chinh tep nay).
 {
 set -euo pipefail
+# Chay tu thu muc user tendv2 doc duoc (vd ezdxf doc ezdxf.ini o thu muc hien tai; /home/tcd thi bi tu choi)
+cd /srv/tend-v2
 ROOT=/srv/tend-v2
 APP=$ROOT/app
 PY=$APP/.venv/bin/python
