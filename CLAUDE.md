@@ -35,7 +35,7 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 2. ✓ Bộ quy chuẩn bản vẽ + Bộ Tend cho AutoCAD + nhập DXF có lọc → bản vẽ chỉ xem; chép dữ liệu đầu từ bản cũ (chỉ đọc). Xem mục dưới.
 3. ✓ Bot giám sát: báo cáo, ảnh, lý do giảm, chấm công; bảng công tháng, chi phí công nhật. Xem mục dưới.
 4. ✓ Bot kế toán: phiếu thu/chi (chữ, ảnh phiếu), lệnh tra cứu; xuất MISA. Xem mục dưới.
-5. Báo cáo tải về (Excel).
+5. ✓ Báo cáo tải về (Excel). Xem mục dưới.
 6. Triển khai `app.tend.vn`, chuyển bot sang; so.tend.vn chỉ tra cứu.
 
 ## Bản vẽ (đợt 2, 18/11/2026)
@@ -64,3 +64,10 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - Bot (`chat/money_bot.py`): cú pháp ngắn `<loại> <số tiền> <đối tượng> [TN-22] [PC12] [ck|tm] [15/11] [- nội dung]` (`chat/parse.money`), hoặc AI (Haiku đọc **ảnh phiếu**, ảnh thu nhỏ ≤ 1568 px, `propose_entries` có `photo_index`; ảnh lưu làm chứng từ `MEDIA_ROOT/chung-tu/`). Nút hỏi: đối tượng (`mp:`), công trình (`mj:`), vẫn ghi (`md:`), Giám đốc duyệt huỷ (`dv:`/`dx:`). Lệnh `/thuchi`, `/congno`, `/baocao`, `/doituong`, `/huy`. `python manage.py tom_tat_ngay` gửi Giám đốc tóm tắt thu chi + phiếu huỷ trong ngày (hẹn giờ đặt ở đợt 6).
 - Web mục **Báo cáo**: Sổ thu chi `/bao-cao/thu-chi/` (lọc, tổng thu/chi/phát sinh nợ, phiếu huỷ gạch ngang, ảnh chứng từ `/chung-tu/<id>/` có kiểm quyền, Excel), Công nợ `/bao-cao/cong-no/` (khách chỉ vai xem phải thu, Excel), Xuất MISA `/bao-cao/misa/` (`money/misa.py`, 5 mẫu ASP như bản cũ; khoán tổ không xuất; đánh dấu đã xuất, xuất lại có cảnh báo; tài khoản ở trang quản trị › Cài đặt kế toán), Đối tượng `/doi-tuong/` (sửa mã MISA, MST… có nhật ký).
 - Chưa thử Claude API đọc ảnh thật, chưa đặt hẹn giờ tóm tắt ngày (đợt 6).
+
+## Báo cáo tải về (đợt 5, 18/11/2026)
+
+- Mục **Báo cáo** cho mọi vai (`money/views.hub`, `templates/money/hub.html`); Excel dựng ở `overview/exports.py`, tính lúc tải từ dữ liệu gốc, phần tiền theo vai (giám sát/thiết kế: tiến độ + số công; kế toán nội bộ: chi phí, nợ NCC/tổ, không giá bán/tiền khách; kế toán tài chính, Giám đốc: đủ). Phiếu huỷ không tính.
+- **Tổng quan 5 câu hỏi** `/bao-cao/tai/tong-quan/`: trang tóm tắt + mỗi công trình một trang (tiến độ, quá hạn, nợ NCC/tổ/công nhật, khách, lãi lỗ).
+- **Báo cáo tháng theo công trình** `/bao-cao/tai/thang/?cong_trinh=&thang=YYYY-MM`: Tóm tắt, Tiến độ từng chi tiết (% đầu/cuối tháng theo báo cáo mới nhất tới mốc, KL làm trong tháng = thiết kế × chênh %, giá trị bán/vốn theo quyền), Báo cáo ngày, Chấm công (đơn giá chỉ vai xem chi phí), Thu chi (vai kế toán). Tháng chưa tới: 404.
+- **Lãi lỗ** `/bao-cao/tai/lai-lo/` (chỉ Giám đốc, kế toán tài chính): doanh thu, giá trị đã làm, chi phí theo loại (`overview.compute.profit` thêm `parts`, `earned`), lãi theo tiến độ, giá vốn còn lại, lãi dự báo, ghi chú thiếu dữ liệu, dòng TỔNG.

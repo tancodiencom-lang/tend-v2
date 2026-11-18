@@ -63,8 +63,12 @@ def _xlsx(name, title, head, rows, money_cols=()):
 @login_required
 @require_GET
 def hub(request):
-    _money_user(request)
-    return render(request, "money/hub.html", {"can_misa": bool(services.visible_kinds(request.user))})
+    """Mục Báo cáo cho mọi vai: tải Excel tiến độ/chấm công; vai xem tiền có thêm sổ thu chi, công nợ, MISA, lãi lỗ."""
+    today = timezone.localdate()
+    return render(request, "money/hub.html", {"can_misa": bool(services.visible_kinds(request.user)),
+                                              "money": request.user.sees_payables or request.user.sees_receivables,
+                                              "projects": projects_for(request.user).filter(active=True).order_by("code"),
+                                              "month": today.strftime("%Y-%m")})
 
 
 @login_required

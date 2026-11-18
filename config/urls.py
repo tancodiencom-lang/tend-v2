@@ -19,5 +19,8 @@ urlpatterns = [
     path("", include("field.urls")),
     path("", include("money.urls")),
     path("tai-khoan/", overview_views.account, name="account"),
+    path("bao-cao/tai/tong-quan/", overview_views.export_overview, name="reports_overview_xlsx"),
+    path("bao-cao/tai/thang/", overview_views.export_month, name="reports_month_xlsx"),
+    path("bao-cao/tai/lai-lo/", overview_views.export_profit, name="reports_profit_xlsx"),
     path("quan-tri/", admin.site.urls),
 ]

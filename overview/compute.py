@@ -197,12 +197,15 @@ def profit(project, today, data=None):
     data = data if data is not None else rows(project)
     revenue = contract_value(project, data)
     labor_accrued, missing_rates = labor_cost(project)
-    incurred = (_sum(project, Kind.SUPPLIER_GOODS) + _sum(project, Kind.TEAM_WORK) + labor_accrued
-                + _sum(project, Kind.OTHER_EXPENSE))
+    parts = {"goods": _sum(project, Kind.SUPPLIER_GOODS), "team": _sum(project, Kind.TEAM_WORK), "labor": labor_accrued,
+             "other": _sum(project, Kind.OTHER_EXPENSE)}
+    incurred = sum(parts.values(), ZERO)
+    earned = sum((r.value * r.percent_at(today) / HUNDRED for r in data), ZERO)
     missing_cost = [r.item.code for r in data if r.item.cost_price is None]
     remaining = sum(((r.item.cost_price or ZERO) * (r.item.design_quantity or ZERO) * (HUNDRED - r.percent_at(today)) / HUNDRED
                      for r in data), ZERO)
-    out = {"revenue": revenue, "incurred": incurred, "remaining_cost": remaining, "missing_cost": len(missing_cost),
+    out = {"revenue": revenue, "incurred": incurred, "parts": parts, "earned": earned, "remaining_cost": remaining,
+           "missing_cost": len(missing_cost),
            "missing_rates": missing_rates, "forecast": None, "ratio": None}
     if revenue and not missing_cost and data:
         out["forecast"] = revenue - incurred - remaining

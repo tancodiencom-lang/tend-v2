@@ -1,12 +1,26 @@
 {% extends "base.html" %}{% block title %}Báo cáo{% endblock %}
 {% block content %}
 <h1>Báo cáo</h1>
-<p class="muted">Kế toán nhập phiếu thu/chi qua bot Telegram (chữ hoặc ảnh phiếu). Ở đây xem, tải Excel, xuất MISA.</p>
+<p class="muted">Số liệu nhập qua bot Telegram; ở đây xem và tải Excel. Mỗi tệp chỉ có phần tiền mà vai của anh/chị được xem.</p>
+<h2>Tải Excel</h2>
+<div class="cards">
+  <section class="card"><header><b>Tổng quan 5 câu hỏi</b></header><p class="muted">Một trang tóm tắt các công trình, mỗi công trình một trang chi tiết.</p>
+    <p><a class="btn" href="{% url 'reports_overview_xlsx' %}">Tải tổng quan</a></p></section>
+  <section class="card"><header><b>Báo cáo tháng theo công trình</b></header><p class="muted">Tiến độ từng chi tiết đầu/cuối tháng, khối lượng làm trong tháng, báo cáo ngày, chấm công{% if money %}, thu chi{% endif %}.</p>
+    <form method="get" action="{% url 'reports_month_xlsx' %}" class="row-form">
+      <label>Công trình <select name="cong_trinh" required>{% for p in projects %}<option value="{{ p.code }}">{{ p.code }} · {{ p.name }}</option>{% endfor %}</select></label>
+      <label>Tháng <input type="month" name="thang" value="{{ month }}"></label>
+      <button class="btn" type="submit"{% if not projects %} disabled{% endif %}>Tải báo cáo tháng</button>
+    </form></section>
+  {% if user.sees_profit %}<section class="card"><header><b>Lãi lỗ</b></header><p class="muted">Doanh thu, giá trị đã làm, chi phí theo loại, lãi theo tiến độ, lãi dự báo từng công trình.</p>
+    <p><a class="btn" href="{% url 'reports_profit_xlsx' %}">Tải lãi lỗ</a></p></section>{% endif %}
+</div>
+{% if money %}<h2>Xem trên web</h2>
 <div class="cards">
   <a class="card" href="{% url 'money_ledger' %}"><header><b>Sổ thu chi</b></header><span class="muted">Phiếu theo ngày, công trình, loại, đối tượng; phiếu huỷ gạch ngang; tải Excel.</span></a>
   <a class="card" href="{% url 'money_debts' %}"><header><b>Công nợ</b></header><span class="muted">Nhà cung cấp, tổ thợ, lương công nhật{% if user.sees_receivables %}, khách hàng{% endif %} theo công trình.</span></a>
   {% if user.sees_payables %}<a class="card" href="{% url 'field_attendance' %}"><header><b>Bảng công</b></header><span class="muted">Công theo người, chi phí công nhật ước tính.</span></a>{% endif %}
   {% if can_misa %}<a class="card" href="{% url 'money_misa' %}"><header><b>Xuất MISA</b></header><span class="muted">Phiếu thu, phiếu chi, mua hàng theo mẫu nhập khẩu MISA ASP.</span></a>{% endif %}
   <a class="card" href="{% url 'money_parties' %}"><header><b>Đối tượng</b></header><span class="muted">Nhà cung cấp, tổ thợ, khách: mã MISA, mã số thuế, công nợ.</span></a>
-</div>
+</div>{% else %}<p><a href="{% url 'field_attendance' %}">Bảng công tháng (số công)</a></p>{% endif %}
 {% endblock %}
