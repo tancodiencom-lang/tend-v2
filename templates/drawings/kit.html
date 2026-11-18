@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Bộ Tend cho AutoCAD{% endblock %}
+{% block content %}
+<p><a href="{% url 'drawings_index' %}">‹ Bản vẽ</a></p>
+<h1>Bộ Tend cho AutoCAD</h1>
+<p>Cho AutoCAD bản đầy đủ 2018 trở lên. Phiên bản {{ version }}.</p>
+<p><a class="btn" href="{% url 'drawings_kit_download' %}">Tải bộ (.zip)</a></p>
+<section class="box"><h2>Cài một lần</h2><ol>
+<li>Giải nén, chép thư mục vào <b>C:\Tend</b>.</li>
+<li>AutoCAD › gõ <b>OP</b> › Files › Trusted Locations › Add › <b>C:\Tend</b>.</li>
+<li>Gõ <b>APPLOAD</b> › Startup Suite › Contents › Add › chọn <b>tend.lsp</b>. Từ nay mở AutoCAD là có Bộ Tend.</li>
+<li>Mở <b>Tend-TCD.dxf</b> › Save As › AutoCAD Drawing Template (*.dwt), tên "Tend TCD". Công trình mới chọn bản mẫu này. Bản vẽ cũ: gõ <b>TENDCAIDAT</b>.</li>
+</ol></section>
+<section class="box"><h2>Bảng nút (lệnh TEND)</h2>{% for group, labels in groups %}<p><b>{{ group }}:</b> {{ labels|join:" · " }}</p>{% endfor %}
+<p class="muted">Mỗi nút tự chuyển đúng layer rồi vẽ. Mỗi mặt bằng một Khung tầng có tiêu đề tầng. Tường bấm theo tim; cửa bấm hai mép ô cửa trên tường.</p></section>
+<section class="box"><h2>Kiểm tra và Xuất cho Tend</h2>
+<p><b>Kiểm tra</b> (TENDKIEMTRA) liệt kê và chọn sẵn đối tượng ngoài quy chuẩn: {{ reasons|join:"; " }}.</p>
+<p><b>Xuất cho Tend</b> (TENDXUAT) lưu bản DWG gốc, tạo <b>&lt;tên&gt;_tend.dxf</b> chỉ còn phần đúng quy chuẩn rồi mở lại bản gốc. Tend lọc thêm một lần khi nhập.</p></section>
+<section class="box"><h2>Layer chuẩn</h2><ul class="lines">{% for l in layers %}<li><span><b>{{ l.name }}</b> · {{ l.title }}</span><span>{% if l.work %}{{ l.work }} ({{ l.unit }}){% endif %}</span></li>{% endfor %}</ul></section>
+<section class="box"><h2>Thư viện block</h2><ul class="lines">{% for b in blocks %}<li><span><b>{{ b.name }}</b> · {{ b.title }}</span><span>{{ b.layer }}</span></li>{% endfor %}</ul></section>
+{% endblock %}

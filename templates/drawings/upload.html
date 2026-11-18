@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}Nhập bản vẽ {{ project.code }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'drawings_view' project.code %}">‹ Bản vẽ</a></p>
+<h1>Nhập bản vẽ · {{ project.code }}</h1>
+{% for m in messages %}<p class="bad">{{ m }}</p>{% endfor %}
+<p>Tải tệp <b>_tend.dxf</b> tạo bằng nút <b>Xuất cho Tend</b> trong AutoCAD (nên nén .zip). Tend lọc lại phần ngoài quy chuẩn và cho xem trước; chưa ghi gì cho tới khi bấm Xác nhận.</p>
+<p class="muted">Nhập lại bản vẽ đã sửa: chi tiết trùng hình giữ mã cũ và số liệu thi công; chỉ thay các tầng có trong tệp.</p>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+  <p><input type="file" name="tep" accept=".dxf,.zip" required></p>
+  <p><button class="btn" type="submit">Đọc tệp</button> <a href="{% url 'drawings_kit' %}">Bộ Tend cho AutoCAD</a></p>
+</form>
+{% endblock %}

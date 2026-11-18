@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% load tend %}{% block title %}Khối lượng {{ project.code }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'drawings_view' project.code %}">‹ Bản vẽ</a></p>
+<h1>Bảng khối lượng · {{ project.code }}</h1>
+<p><a class="btn plain" href="?tai=xlsx">Tải Excel</a></p>
+{% if not lines %}<p class="missing">Chưa có chi tiết khối lượng (chưa nhập bản vẽ).</p>{% else %}
+<div class="scroll"><table class="grid">
+<thead><tr><th class="code">Mã</th><th>Công việc</th><th>Vị trí</th><th>Đơn vị</th><th class="n">KL thiết kế</th><th class="n">Đã báo</th><th class="n">KL đã làm</th>{% if show_sale %}<th class="n">Đơn giá bán</th><th class="n">Thành tiền bán</th>{% endif %}{% if show_cost %}<th class="n">Đơn giá vốn</th><th class="n">Thành tiền vốn</th>{% endif %}</tr></thead>
+{% regroup lines by item.floor as floors %}{% for f in floors %}<tbody><tr class="floor"><th colspan="{{ cols }}">{{ f.grouper|default:"Chung" }}</th></tr>{% for l in f.list %}<tr><td class="code">{{ l.item.code }}</td><td class="work">{{ l.item.work }}{% if l.item.note %}<br><small class="muted">{{ l.item.note }}</small>{% endif %}</td><td>{{ l.item.location }}</td><td>{{ l.item.unit }}</td><td class="n">{{ l.item.design_quantity|num }}</td><td class="n">{{ l.percent|pct }}</td><td class="n">{{ l.done|num }}</td>{% if show_sale %}<td class="n">{{ l.item.sale_price|vnd|default:"—" }}</td><td class="n">{{ l.sale_total|vnd|default:"—" }}</td>{% endif %}{% if show_cost %}<td class="n">{{ l.item.cost_price|vnd|default:"—" }}</td><td class="n">{{ l.cost_total|vnd|default:"—" }}</td>{% endif %}</tr>{% endfor %}</tbody>{% endfor %}
+</table></div>{% endif %}
+{% endblock %}

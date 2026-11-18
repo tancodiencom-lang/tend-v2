@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Bản vẽ{% endblock %}
+{% block content %}
+<h1>Bản vẽ</h1>
+<p class="muted">Chỉ xem. Giám sát báo cáo qua Telegram; bản vẽ cập nhật theo báo cáo.</p>
+{% if user.edits_drawings %}<p><a class="btn plain" href="{% url 'drawings_kit' %}">Bộ Tend cho AutoCAD</a></p>{% endif %}
+<div class="cards">{% for r in rows %}
+  <a class="card" href="{% url 'drawings_view' r.project.code %}"><header><b>{{ r.project }}</b></header>
+  {% if r.floors %}<span class="muted">{{ r.floors|join:" · " }}</span>{% else %}<span class="missing">Chưa nhập bản vẽ</span>{% endif %}</a>
+{% empty %}<p class="missing">Chưa được giao công trình nào.</p>{% endfor %}</div>
+{% endblock %}

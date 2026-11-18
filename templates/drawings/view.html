@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% load static %}{% block title %}Bản vẽ {{ project.code }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'drawings_index' %}">‹ Bản vẽ</a></p>
+<h1>{{ project }}</h1>
+{% for m in messages %}<p class="{% if m.tags == 'error' %}bad{% else %}good{% endif %}">{{ m }}</p>{% endfor %}
+<p class="actions"><a href="{% url 'drawings_quantities' project.code %}">Bảng khối lượng</a>{% if can_import %} · <a href="{% url 'drawings_upload' project.code %}">Nhập bản vẽ DXF (máy tính)</a>{% endif %}</p>
+{% if not drawing %}<p class="missing">Chưa nhập bản vẽ.</p>{% else %}
+<nav class="floors" aria-label="Tầng">{% for d in drawings %}<a href="?tang={{ d.floor|urlencode }}"{% if d == drawing %} aria-current="page"{% endif %}>{{ d.floor }}</a>{% endfor %}</nav>
+{% if groups|length > 1 %}<div class="chips" role="group" aria-label="Lớp hiện trên bản vẽ">{% for key, title in groups %}<button type="button" data-layer="{{ key }}" aria-pressed="true">{{ title }}</button>{% endfor %}</div>{% endif %}
+<div class="viewer"><div>
+<div class="plan" data-plan style="aspect-ratio:{{ ratio }}">
+  <svg viewBox="{{ box }}" data-svg role="img" aria-label="Mặt bằng {{ drawing.floor }}">
+    <defs><pattern id="soc" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="8" fill="#e2a35b"/></pattern></defs>
+    <g class="bg">{% for layer, paths in drawing.background.items %}{% for d in paths %}<path d="{{ d }}"/>{% endfor %}{% endfor %}</g>
+    <g class="items">{% for s in shapes %}<path class="it {{ s.css }} {{ s.kind }} g-{{ s.group }}" d="{{ s.d }}" data-i="{{ s.i }}"/>{% endfor %}</g>
+    <g class="codes">{% for s in shapes %}{% if s.label %}<text class="g-{{ s.group }}" x="{{ s.lx|stringformat:'g' }}" y="{{ s.ly|stringformat:'g' }}" font-size="{{ label_size }}">{{ s.mark }} {{ s.code }}</text>{% endif %}{% endfor %}</g>
+  </svg>
+  <div class="zoom"><button type="button" data-zoom="1.4" aria-label="Phóng to">＋</button><button type="button" data-zoom="0.7" aria-label="Thu nhỏ">－</button><button type="button" data-zoom="0" aria-label="Vừa khung">⤢</button></div>
+</div>
+<p class="legend"><span><i class="todo"></i>○ Chưa làm</span><span><i class="doing"></i>◐ Đang làm</span><span><i class="done"></i>✓ Xong</span></p>
+</div>
+<aside class="box" data-panel aria-live="polite"><p class="muted">Chạm một chi tiết trên bản vẽ hoặc trong danh sách để xem.</p></aside></div>
+<section class="box"><h2>Chi tiết {{ drawing.floor }}</h2><ul class="lines">{% for x in info %}
+  <li><button type="button" class="link" data-pick="{{ forloop.counter0 }}">{{ x.code }} · {{ x.work }}</button><span>{{ x.status }} {{ x.percent }}%</span></li>{% endfor %}</ul></section>
+{{ info|json_script:"plan-info" }}
+<script src="{% static 'drawings/ban-ve.js' %}" defer></script>
+{% endif %}
+{% endblock %}

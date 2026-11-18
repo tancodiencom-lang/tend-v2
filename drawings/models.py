@@ -12,6 +12,7 @@ class Drawing(models.Model):
     background = models.JSONField("Nét nền", default=dict, help_text="{layer: [đường SVG]}")
     source_name = models.CharField("Tệp gốc", max_length=255, blank=True)
     version = models.PositiveIntegerField("Lần nhập", default=1)
+    wall_height = models.PositiveIntegerField("Cao tường mặc định (mm)", null=True, blank=True)
     imported_at = models.DateTimeField("Nhập lúc", auto_now_add=True)
 
     class Meta:
@@ -34,6 +35,7 @@ class Item(models.Model):
     cost_price = models.DecimalField("Đơn giá vốn (₫)", max_digits=15, decimal_places=0, null=True, blank=True)
     plan_start = models.DateField("Kế hoạch bắt đầu", null=True, blank=True)
     plan_end = models.DateField("Kế hoạch xong", null=True, blank=True)
+    note = models.CharField("Cách tính", max_length=300, blank=True)
     geometry = models.JSONField("Hình trên bản vẽ", null=True, blank=True)
     source_key = models.CharField("Mã nguồn bản vẽ", max_length=100, blank=True)
     active = models.BooleanField("Còn dùng", default=True)

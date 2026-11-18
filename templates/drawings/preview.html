@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% load tend %}{% block title %}Xem trước bản vẽ{% endblock %}
+{% block content %}
+<p><a href="{% url 'drawings_upload' project.code %}">‹ Tải tệp khác</a></p>
+<h1>Xem trước · {{ parsed.source_name }}</h1>
+{% for m in messages %}<p class="bad">{{ m }}</p>{% endfor %}
+<p class="muted">Chưa ghi gì. Kiểm tra rồi bấm <b>Xác nhận nhập</b>.</p>
+{% if parsed.dropped %}<section class="box"><h2>⚠ Phần bị bỏ (ngoài quy chuẩn)</h2><ul class="lines">{% for d in parsed.dropped %}<li><span>{{ d.layer }} · {{ d.reason }}</span><span>{{ d.count }} đối tượng</span></li>{% endfor %}</ul>
+<p class="muted">Muốn giữ phần nào thì vẽ lại bằng nút trong bảng TEND, bấm Kiểm tra rồi xuất lại.</p></section>{% endif %}
+{% if parsed.warnings %}<section class="box"><h2>⚠ Cần xem lại</h2><ul class="lines">{% for w in parsed.warnings %}<li><span>{{ w }}</span></li>{% endfor %}</ul></section>{% endif %}
+{% if result.kept %}<section class="box"><h2>⚠ Chi tiết đã có báo cáo nhưng không còn trên bản vẽ mới</h2><p>Vẫn giữ để không mất số liệu thi công. Báo Giám đốc quyết định.</p><ul class="lines">{% for it in result.kept %}<li><span>{{ it.code }} · {{ it.work }}</span><span>{{ it.floor }}</span></li>{% endfor %}</ul></section>{% endif %}
+{% if result.retired %}<section class="box"><h2>Chi tiết thôi dùng (chưa có báo cáo)</h2><ul class="lines">{% for it in result.retired %}<li><span>{{ it.code }} · {{ it.work }}</span><span>{{ it.floor }}</span></li>{% endfor %}</ul></section>{% endif %}
+<form method="post">{% csrf_token %}
+{% for f in floors %}<section class="box"><h2>{{ f.floor.name }} <small class="muted">· {{ f.floor.title }}</small></h2>
+  {% if f.has_walls %}<p><label>Chiều cao tường của tầng (mm, tường có ghi H= thì theo H=): <input type="text" inputmode="numeric" name="cao_{{ f.floor.token }}" value="{{ f.height }}" size="6"></label></p>{% endif %}
+  <p class="muted">Mới {{ f.counts.new }} · cập nhật {{ f.counts.update }} · giữ nguyên {{ f.counts.same }}</p>
+  <div class="scroll"><table class="grid"><thead><tr><th>Mã</th><th>Công việc</th><th>Vị trí</th><th class="n">Khối lượng</th><th>Cách tính</th><th>So với bản cũ</th></tr></thead><tbody>
+  {% for r in f.rows %}<tr><td>{{ r.code }}</td><td>{{ r.work }}</td><td>{{ r.location }}</td><td class="n">{{ r.quantity|num }} {{ r.unit }}</td><td><small>{{ r.note }}</small></td><td>{% if r.status == "new" %}＋ mới{% elif r.status == "update" %}✎ đổi {{ r.changes|join:", " }}{% else %}= giữ nguyên{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div></section>{% endfor %}
+<p><button class="btn plain" type="submit" formmethod="get">Tính lại theo chiều cao</button> <button class="btn" type="submit">Xác nhận nhập</button></p>
+</form>
+{% endblock %}
