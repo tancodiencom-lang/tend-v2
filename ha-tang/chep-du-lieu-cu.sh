@@ -6,6 +6,8 @@
 #   Chep that:  sudo bash /srv/tend-v2/app/ha-tang/chep-du-lieu-cu.sh --thuc-hien --nguoi quan
 #   (quan = ten dang nhap Giam doc o ban cu; nhat ky dung ten nguoi nay)
 set -euo pipefail
+# Chay tu thu muc user tendv2 doc duoc (vd ezdxf doc ezdxf.ini o thu muc hien tai; /home/tcd thi bi tu choi)
+cd /srv/tend-v2
 APP=/srv/tend-v2/app
 
 echo "== 1. Sao CSDL cu thanh ban sao tend_ban_sao =="

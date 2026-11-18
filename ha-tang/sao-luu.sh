@@ -2,6 +2,8 @@
 # Sao luu Tend moi ra Google Drive (da ma hoa), cung kho rclone voi ban cu, thu muc rieng tend-v2/.
 # Chay tu dong 02:30 (tend-v2-saoluu.timer). Chay tay: sudo systemctl start tend-v2-saoluu
 set -euo pipefail
+# Chay tu thu muc user tendv2 doc duoc (vd ezdxf doc ezdxf.ini o thu muc hien tai; /home/tcd thi bi tu choi)
+cd /
 
 REMOTE=tendcrypt:tend-v2/
 KEEP_DAILY=14
