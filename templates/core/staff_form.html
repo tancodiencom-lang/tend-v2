@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}{% if person %}{{ person.username }}{% else %}Thêm tài khoản{% endif %}{% endblock %}
+{% block content %}
+<p><a href="{% url 'staff' %}">‹ Nhân viên</a></p>
+<h1>{% if person %}{{ person }} <span class="muted">({{ person.username }})</span>{% else %}Thêm tài khoản{% endif %}</h1>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+{% if person and not person.is_active %}<p class="err">▼ Tài khoản đang khoá: không đăng nhập được, bot không làm việc với người này.</p>{% endif %}
+<form method="post" class="box stack">{% csrf_token %}<input type="hidden" name="action" value="save">
+  <h2>Thông tin và quyền</h2>
+  {% if not person %}<label>Tên đăng nhập <input name="username" value="{{ form.username|default:'' }}" required autocomplete="off" placeholder="vd nam.gs"></label>{% endif %}
+  <label>Tên <input name="first_name" value="{{ form.first_name|default:'' }}" placeholder="vd Nam"></label>
+  <label>Họ, tên đệm <input name="last_name" value="{{ form.last_name|default:'' }}" placeholder="vd Nguyễn Văn"></label>
+  <label>Vai <select name="role">{% for value, label in roles %}<option value="{{ value }}"{% if form.role == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <label>Số điện thoại (đúng số dùng cho Telegram) <input name="phone" value="{{ form.phone|default:'' }}" inputmode="tel" placeholder="nhập số, vd 09xx xxx xxx"></label>
+  <fieldset><legend>Công trình được giao <span class="muted">(Giám đốc luôn thấy tất cả)</span></legend>
+    {% for p in projects %}<label class="check"><input type="checkbox" name="cong_trinh" value="{{ p.pk }}"{% if p.pk in chosen %} checked{% endif %}> {{ p.code }} · {{ p.name }}{% if not p.active %} <span class="muted">(đã xong)</span>{% endif %}</label>{% empty %}<p class="muted">Chưa có công trình.</p>{% endfor %}
+  </fieldset>
+  {% if not person %}<label>Mật khẩu tạm (ít nhất 10 ký tự; người dùng phải đổi khi đăng nhập lần đầu)
+    <input name="password" type="password" required autocomplete="new-password"></label>{% endif %}
+  {% if person %}<button class="btn" type="submit">Lưu</button>{% else %}<button class="btn" type="submit" formaction="{% url 'staff_new' %}">Thêm tài khoản</button>{% endif %}
+</form>
+{% if person %}
+<form method="post" class="box stack">{% csrf_token %}<input type="hidden" name="action" value="password">
+  <h2>Đặt mật khẩu tạm</h2><p class="muted">Khi người này quên mật khẩu. Lần đăng nhập tới hệ thống bắt đổi mật khẩu mới.</p>
+  <label>Mật khẩu tạm <input name="password" type="password" required autocomplete="new-password"></label>
+  <button class="btn plain" type="submit">Đặt mật khẩu tạm</button>
+</form>
+{% if person.pk != user.pk %}<form method="post" class="box stack">{% csrf_token %}
+  {% if person.is_active %}<input type="hidden" name="action" value="lock"><h2>Khoá tài khoản</h2>
+  <p class="muted">Nghỉ việc hoặc lộ mật khẩu: khoá ngay. Không xoá dữ liệu; mở khoá lại được.</p>
+  <label>Lý do <input name="reason" required placeholder="vd nghỉ việc từ 20/11"></label><button class="btn plain" type="submit">Khoá tài khoản</button>
+  {% else %}<input type="hidden" name="action" value="unlock"><h2>Mở khoá tài khoản</h2><button class="btn" type="submit">Mở khoá</button>{% endif %}
+</form>{% endif %}
+{% endif %}
+{% endblock %}

@@ -78,7 +78,7 @@ def claim(code, external_id, chat_id, display_name):
         raise ValidationError("Mã không đúng hoặc đã hết hạn. Lấy mã mới ở Tend › Tài khoản › Kết nối Telegram.")
     if not phone_digits(row.user.phone):
         raise ValidationError(f"Tài khoản Tend {row.user} chưa có số điện thoại nên chưa kết nối được. Nhờ Giám đốc nhập số "
-                              "điện thoại ở Thiết lập › Người dùng rồi lấy mã mới.")
+                              "điện thoại ở Tài khoản › Nhân viên rồi lấy mã mới.")
     row.used_at, row.claimed_by, row.claimed_chat, row.claimed_name = timezone.now(), str(external_id), str(chat_id), display_name[:200]
     row.save(update_fields=["used_at", "claimed_by", "claimed_chat", "claimed_name"])
     return row

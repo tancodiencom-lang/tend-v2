@@ -72,3 +72,7 @@ h2+.cards{margin-top:8px}.page>h2{margin-top:18px}
 .avatar.big{width:64px;height:64px;font-size:22px}
 .person-head{display:flex;align-items:center;gap:14px}.person-head h1{margin:0}
 .err{color:#9b2c1d;font-weight:600}
+.acts form{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px}.acts input{min-width:150px}.acts .btn{min-height:36px;padding:0 10px}
+.stack{display:flex;flex-direction:column;gap:10px;max-width:560px}.stack label{display:flex;flex-direction:column;gap:4px}
+.stack label.check{flex-direction:row;align-items:center;gap:8px}.stack fieldset{border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.stack input:not([type=checkbox]),.stack select{min-height:40px;font:inherit;padding:0 8px}

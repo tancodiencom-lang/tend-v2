@@ -57,4 +57,3 @@ def avatar(request, pk):
         raise Http404
     response["Cache-Control"] = "private, max-age=3600"
     return response
-
