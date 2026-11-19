@@ -2,7 +2,7 @@
 {% block content %}
 <p><a href="{% url 'account' %}">‹ Tài khoản</a></p>
 <h1>Kết nối Telegram</h1>
-{% for m in messages %}<p class="good">{{ m }}</p>{% endfor %}
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}missing{% else %}good{% endif %}">{{ m }}</p>{% endfor %}
 {% if not ready %}<p class="missing">Máy chủ chưa cấu hình bot Telegram.</p>{% endif %}
 <section class="box">
 {% if links %}<p>✓ Đang kết nối: {% for l in links %}<b>{{ l.display_name|default:"Telegram" }}</b> từ {{ l.linked_at|date:"d/m/Y H:i" }}{% endfor %}</p>
@@ -10,10 +10,14 @@
 {% else %}<p>Chưa kết nối. Kết nối một lần để báo cáo, chấm công và hỏi số liệu qua Telegram.</p>{% endif %}
 </section>
 <section class="box"><h2>Lấy mã kết nối</h2>
+<p class="muted">Hai bước: (1) nhắn mã cho bot; (2) bấm nút 📱 bot gửi để Telegram gửi số điện thoại của anh/chị. Số đó phải trùng số
+công ty đã ghi cho tài khoản này{% if user.phone %} (<b>{{ user.phone|slice:":3" }}…{{ user.phone|slice:"-3:" }}</b>){% endif %}. Lộ mã cũng không sao:
+người khác không có đúng số điện thoại thì không kết nối được, và Giám đốc được báo.</p>
+{% if not user.phone %}<p class="missing">Tài khoản chưa có số điện thoại. Nhờ Giám đốc nhập ở Thiết lập › Người dùng rồi mới lấy mã.</p>{% endif %}
 {% if code %}<p>Mã của anh/chị (dùng một lần trong 15 phút):</p><p class="big">{{ code }}</p>
 {% if deep_link %}<p><a class="btn" href="{{ deep_link }}">Mở Telegram và kết nối</a></p>{% endif %}
 <p class="muted">Hoặc nhắn cho bot{% if bot_username %} @{{ bot_username }}{% endif %}: <b>/ketnoi {{ code }}</b></p>
-{% else %}<form method="post">{% csrf_token %}<button class="btn" type="submit">Lấy mã kết nối</button></form>{% endif %}
+{% elif user.phone %}<form method="post">{% csrf_token %}<button class="btn" type="submit">Lấy mã kết nối</button></form>{% endif %}
 </section>
 <section class="box"><h2>Cách dùng</h2>
 <p>Gửi ảnh rồi nhắn: <i>TN-22 T2.5 40%, S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ</i>. Bot lập phiếu, bấm <b>✓ Xác nhận</b> mới ghi. Gửi báo cáo là anh/chị tự có công tại công trình đó.</p>

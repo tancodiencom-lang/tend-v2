@@ -1,8 +1,9 @@
 {% extends "base.html" %}{% block title %}Tài khoản{% endblock %}
 {% block content %}
 <div class="person-head">
-  {% if user.avatar %}<img class="avatar big" src="{% url 'user_avatar' user.pk %}" alt="Ảnh {{ user }}">{% else %}<span class="avatar big" aria-hidden="true">{{ initials }}</span>{% endif %}
-  <div><h1>{{ user }}</h1><p class="muted">{{ role_label }} · tên đăng nhập <b>{{ user.username }}</b></p></div>
+  {% if user.avatar %}<img class="avatar big" src="{% url 'user_avatar' user.pk %}" alt="Ảnh {{ user }}" width="64" height="64">{% else %}<span class="avatar big" aria-hidden="true">{{ initials }}</span>{% endif %}
+  <div><h1>{{ user }}</h1><p class="muted">{{ role_label }} · tên đăng nhập <b>{{ user.username }}</b> · điện thoại
+  {% if user.phone %}<b>{{ user.phone }}</b>{% else %}<b>chưa có</b> (cần để kết nối Telegram; nhờ Giám đốc nhập){% endif %}</p></div>
 </div>
 <section class="box">
   <h2>Ảnh nhân viên</h2>

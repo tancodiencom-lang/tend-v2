@@ -23,6 +23,7 @@ from asks import services as asks
 from asks.models import Ask
 from core.audit import record_save
 from core.models import User
+from core.text import phone as phone_digits
 from core.text import vn_number
 from drawings.models import Item
 from field import services as field
@@ -69,18 +70,52 @@ def new_code(user):
 
 
 @transaction.atomic
-def link(code, external_id, chat_id, display_name):
+def claim(code, external_id, chat_id, display_name):
+    """Bước 1: mã đúng → giữ mã cho tài khoản Telegram này, chờ số điện thoại. Mã chỉ dùng một lần."""
     row = (LinkCode.objects.select_for_update(of=("self",)).filter(digest=_digest(code.strip()), used_at__isnull=True,
                                                        expires_at__gt=timezone.now()).select_related("user").first())
     if row is None or not row.user.is_active:
         raise ValidationError("Mã không đúng hoặc đã hết hạn. Lấy mã mới ở Tend › Tài khoản › Kết nối Telegram.")
-    row.used_at = timezone.now()
-    row.save(update_fields=["used_at"])
+    if not phone_digits(row.user.phone):
+        raise ValidationError(f"Tài khoản Tend {row.user} chưa có số điện thoại nên chưa kết nối được. Nhờ Giám đốc nhập số "
+                              "điện thoại ở Thiết lập › Người dùng rồi lấy mã mới.")
+    row.used_at, row.claimed_by, row.claimed_chat, row.claimed_name = timezone.now(), str(external_id), str(chat_id), display_name[:200]
+    row.save(update_fields=["used_at", "claimed_by", "claimed_chat", "claimed_name"])
+    return row
+
+
+@transaction.atomic
+def link(contact, external_id, chat_id):
+    """Bước 2: số điện thoại Telegram gửi qua nút (của chính người nhắn) phải trùng số công ty ghi ở tài khoản Tend."""
+    row = (LinkCode.objects.select_for_update(of=("self",)).filter(claimed_by=str(external_id), linked_at__isnull=True,
+                                                       used_at__gte=timezone.now() - CODE_TTL)
+           .select_related("user").order_by("-used_at").first())
+    if row is None:
+        raise ValidationError("Chưa có mã đang chờ. Lấy mã ở Tend › Tài khoản › Kết nối Telegram rồi nhắn /ketnoi <mã>.")
+    if str(contact.get("user_id") or "") != str(external_id):
+        raise ValidationError("Chỉ gửi số điện thoại của chính anh/chị bằng nút 📱 bên dưới, không gửi danh bạ người khác.")
+    got = phone_digits(contact.get("phone_number"))
+    if not got or got != phone_digits(row.user.phone):
+        row.linked_at = timezone.now()           # mã đã hỏng (ghi lại, không hoàn tác): phải lấy mã mới
+        row.save(update_fields=["linked_at"])
+        transaction.on_commit(lambda: _warn_directors(row, got))
+        return None
+    row.linked_at = timezone.now()
+    row.save(update_fields=["linked_at"])
     for old in ChatLink.objects.select_for_update(of=("self",)).filter(active=True).filter(Q(user=row.user) | Q(external_id=str(external_id))):
         old.active = False
         record_save(old, row.user, "Thay kết nối Telegram", channel="telegram")
-    return record_save(ChatLink(user=row.user, external_id=str(external_id), chat_id=str(chat_id), display_name=display_name[:200]),
-                       row.user, "Kết nối Telegram bằng mã một lần", channel="telegram")
+    return record_save(ChatLink(user=row.user, external_id=str(external_id), chat_id=str(chat_id), display_name=row.claimed_name),
+                       row.user, "Kết nối Telegram: mã một lần + số điện thoại trùng", channel="telegram")
+
+
+def _warn_directors(row, got):
+    masked = (got[:3] + "…" + got[-3:]) if len(got) > 6 else "không rõ"
+    for link_row in ChatLink.objects.filter(active=True, user__is_active=True).select_related("user"):
+        if link_row.user.is_director:
+            telegram.send(link_row.chat_id, f"⚠️ Có người dùng Telegram \"{row.claimed_name}\" (số {masked}) nhập đúng mã kết nối của "
+                                            f"{row.user} nhưng số điện thoại KHÔNG trùng. Tend đã từ chối. Nếu không phải {row.user} "
+                                            "thì mã đã bị lộ: nhắc người đó không đưa mã cho ai.")
 
 
 @transaction.atomic
@@ -793,11 +828,25 @@ def handle_message(message):
     found = re.fullmatch(r"/(?:start|ketnoi)\s+(\d{8})", text)
     if found:
         try:
-            row = link(found.group(1), external_id, chat_id, display_name)
+            with transaction.atomic():
+                row = claim(found.group(1), external_id, chat_id, display_name)
         except ValidationError as error:
             telegram.send(chat_id, error.messages[0])
             return
-        telegram.send(chat_id, f"Đã kết nối với tài khoản Tend: {row.user}.\n\n{HELP}")
+        telegram.ask_contact(chat_id, f"Mã đúng cho tài khoản Tend: {row.user}. Bước cuối: bấm nút 📱 bên dưới để Telegram gửi số điện "
+                                      "thoại của anh/chị; số phải trùng số công ty đã ghi thì mới kết nối.")
+        return
+    if message.get("contact"):
+        try:
+            row = link(message["contact"], external_id, chat_id)
+        except ValidationError as error:
+            telegram.send_plain(chat_id, error.messages[0])
+            return
+        if row is None:
+            telegram.send_plain(chat_id, "Số điện thoại Telegram không trùng số công ty ghi cho tài khoản này nên chưa kết nối. "
+                                         "Nếu số công ty ghi sai, nhờ Giám đốc sửa rồi lấy mã mới.")
+            return
+        telegram.send_plain(chat_id, f"✓ Đã kết nối với tài khoản Tend: {row.user}.\n\n{HELP}")
         return
     link_row = ChatLink.objects.filter(external_id=external_id, active=True).select_related("user").first()
     if link_row is None or not link_row.user.is_active:

@@ -112,3 +112,9 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - Ảnh nhân viên `User.avatar` (`core/avatar.py`: JPG/PNG/WEBP ≤ 5 MB, ≤ 512 px, bỏ EXIF; ảnh cũ không xoá): đổi/bỏ ở Tài khoản (nhật ký), xem `/nhan-vien/<id>/anh/` (đã đăng nhập). Mục cuối thanh dưới là **ảnh (hoặc chữ viết tắt) + tên** người đang đăng nhập. Chép ảnh từ bản cũ: `ha-tang/chep-anh-nhan-vien.sh [--thuc-hien]` → `manage.py chep_anh_nhan_vien` (chỉ người chưa có ảnh, không đọc ra ngoài thư mục ảnh).
 - 3 migration (`core.0003` ảnh nhân viên, `chat.0005` nhóm, `assistant.0002` câu hỏi). 99/99 bài kiểm trên SQLite và PostgreSQL 16. Chưa thử Telegram nhóm thật.
 
+## Kết nối Telegram cần số điện thoại; sửa ảnh tài khoản hiện to (19/11/2026)
+
+- Chủ dự án hỏi "lộ mã là mất chức?": kết nối nay **hai bước** — mã một lần (15 phút) rồi bấm nút 📱 của Telegram (`request_contact`) gửi số điện thoại của chính người nhắn (`contact.user_id` phải là người gửi); số phải **trùng `User.phone`** (chuẩn hoá `core.text.phone`: +84/84 → 0). Sai số: mã hỏng, Giám đốc nhận cảnh báo (số che bớt). Tài khoản chưa có số: không lấy được mã (Giám đốc nhập ở Thiết lập › Người dùng). `LinkCode` thêm `claimed_by/claimed_chat/claimed_name/linked_at` (migration `chat.0006`). Kết nối đã có từ trước giữ nguyên.
+- Ảnh tài khoản hiện cỡ gốc + "QUquan": trình duyệt giữ `tend.css` cũ (tên không đổi). Sửa: `core.storage.StaticFiles` (Manifest, tên có dấu vân tay, chưa collectstatic thì dùng tên gốc) + `width/height` trên ảnh. Thanh dưới: ảnh/chữ viết tắt + **tên + chức danh**.
+- 101/101 bài kiểm trên SQLite và PostgreSQL 16.
+

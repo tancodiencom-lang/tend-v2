@@ -75,6 +75,18 @@ def send(chat_id, text, buttons=None, reply_to=None):
     return post('sendMessage', data)
 
 
+def ask_contact(chat_id, text):
+    """Nút "Gửi số điện thoại" của chính Telegram (người dùng bấm là Telegram gửi số đã đăng ký, không gõ tay được)."""
+    return post('sendMessage', {'chat_id': chat_id, 'text': text[:4000], 'reply_markup': {
+        'keyboard': [[{'text': '📱 Gửi số điện thoại để xác minh', 'request_contact': True}]],
+        'one_time_keyboard': True, 'resize_keyboard': True}})
+
+
+def send_plain(chat_id, text):
+    """Tin kèm lệnh gỡ bàn phím xin số điện thoại."""
+    return post('sendMessage', {'chat_id': chat_id, 'text': text[:4000], 'reply_markup': {'remove_keyboard': True}})
+
+
 def edit(chat_id, message_id, text, buttons=None):
     data = {'chat_id': chat_id, 'message_id': message_id, 'text': text[:4000], 'disable_web_page_preview': True,
             'reply_markup': keyboard(buttons or [])}

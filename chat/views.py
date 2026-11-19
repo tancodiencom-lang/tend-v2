@@ -48,6 +48,9 @@ def connect(request):
                 bot.unlink(row, request.user, 'Ngắt kết nối Telegram trên web')
             messages.success(request, 'Đã ngắt kết nối Telegram.')
             return redirect('chat_connect')
+        if not request.user.phone.strip():
+            messages.error(request, 'Tài khoản chưa có số điện thoại nên chưa lấy mã được. Nhờ Giám đốc nhập số ở Thiết lập › Người dùng.')
+            return redirect('chat_connect')
         code = bot.new_code(request.user)
     username = telegram.bot_username()
     return render(request, 'chat/connect.html', {
