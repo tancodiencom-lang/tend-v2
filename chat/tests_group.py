@@ -188,8 +188,8 @@ class AvatarTests(BotCase):
     def test_upload_shows_in_tab_and_colleagues_can_see(self):
         self.client.force_login(self.site)
         page = self.client.get(reverse("account"))
-        self.assertContains(page, '<span class="avatar" aria-hidden="true">MI</span>', html=False)
-        self.assertContains(page, "<span>Minh</span>", html=False)
+        self.assertContains(page, '<span class="avatar" aria-hidden="true">MI </span>', html=False)
+        self.assertContains(page, '<span class="who"><b>Minh</b> <small>Giám sát</small></span>', html=False)
         response = self.client.post(reverse("account"), {"anh": SimpleUploadedFile("a.png", png((1200, 900)), "image/png")})
         self.assertEqual(response.status_code, 302)
         self.site.refresh_from_db()

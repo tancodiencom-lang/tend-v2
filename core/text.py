@@ -40,3 +40,12 @@ def vn_number(value, places=None):
 
 def vnd(value):
     return vn_number(Decimal(str(value)).quantize(Decimal(1))) + " ₫"
+
+
+def phone(text):
+    """"+84 912 345 678" / "84912345678" / "0912.345.678" → "0912345678" ("" nếu không có số)."""
+    digits = re.sub(r"\D", "", str(text or ""))
+    if digits.startswith("84") and len(digits) >= 11:
+        digits = "0" + digits[2:]
+    return digits
+

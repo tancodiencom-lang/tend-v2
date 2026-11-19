@@ -94,14 +94,58 @@ class BotCase(TestCase):
             "message": {"message_id": 1, "chat": {"id": int(chat)}, "text": "phiếu"}}})
 
     def connect(self, user):
+        """Kết nối như thật: mã một lần, rồi bấm nút gửi số điện thoại Telegram (trùng số công ty ghi)."""
         self.chats[user.pk] = str(user.pk + 500)
+        if not user.phone:
+            user.phone = f"09{user.pk:08d}"
+            user.save(update_fields=["phone"])
         self.message(user, f"/ketnoi {bot.new_code(user)}")
+        self.share_phone(user, "+84" + user.phone[1:])
+
+    def share_phone(self, user, number, owner_id=None):
+        chat = self.chats.get(user.pk, str(user.pk + 500))
+        with self.captureOnCommitCallbacks(execute=True):
+            bot.handle_update({"update_id": next(self.update_id), "message": {
+                "message_id": next(self.next_id), "chat": {"id": int(chat), "type": "private"},
+                "from": {"id": user.pk + 9000, "first_name": user.username},
+                "contact": {"phone_number": number, "user_id": owner_id or user.pk + 9000}}})
 
     def proposal(self):
         return Proposal.objects.latest("created_at")
 
 
 class LinkTests(BotCase):
+    def test_leaked_code_useless_without_matching_phone(self):
+        from core.models import User as U
+        intruder = U(username="la", pk=4242)
+        code = bot.new_code(self.site)
+        self.chats[intruder.pk] = "777"
+        self.message(intruder, f"/ketnoi {code}")                           # người khác cầm được mã
+        self.assertIn("bấm nút 📱", self.texts("777")[-1])
+        self.share_phone(intruder, "0987654321", owner_id=4242 + 9000)
+        self.assertIn("không trùng", self.texts("777")[-1])
+        self.assertFalse(ChatLink.objects.filter(external_id=str(4242 + 9000)).exists())
+        warned = self.texts(self.chats[self.director.pk])[-1]
+        self.assertIn("KHÔNG trùng", warned)
+        self.assertIn("098…321", warned)                                     # số che bớt
+        self.share_phone(intruder, "+84" + self.site.phone[1:], owner_id=4242 + 9000)
+        self.assertIn("Chưa có mã đang chờ", self.texts("777")[-1])          # mã đã hỏng sau lần sai
+
+    def test_must_share_own_number_and_need_phone_on_file(self):
+        code = bot.new_code(self.site)
+        self.message(self.site, f"/ketnoi {code}")
+        self.share_phone(self.site, self.site.phone, owner_id=12345)        # gửi danh bạ người khác
+        self.assertIn("chính anh/chị", self.texts()[-1])
+        self.share_phone(self.site, "84" + self.site.phone[1:])            # 84… cũng là 0…
+        self.assertTrue(ChatLink.objects.filter(user=self.site, active=True, external_id=str(self.site.pk + 9000)).exists())
+        nophone = User.objects.create_user("moi", password="x-123-abcd", role=Role.SUPERVISOR)
+        self.message(nophone, f"/ketnoi {bot.new_code(nophone)}")
+        self.assertIn("chưa có số điện thoại", self.texts()[-1])
+        self.client.force_login(nophone)
+        page = self.client.post(reverse("chat_connect"), follow=True)
+        self.assertContains(page, "chưa có số điện thoại")
+        self.assertNotContains(page, "/ketnoi ")
+
     def test_code_once_unlink_and_unknown_user(self):
         self.assertTrue(ChatLink.objects.filter(user=self.site, active=True).exists())
         code = bot.new_code(self.site)

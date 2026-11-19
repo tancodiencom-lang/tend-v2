@@ -80,7 +80,10 @@ cũ vẫn ở so.tend.vn. Chạy lại lệnh chép không chép trùng (bỏ qu
    sudo bash /srv/tend-v2/app/ha-tang/trien-khai.sh
    ```
 
-4. Mỗi người vào app.tend.vn › Tài khoản › Kết nối Telegram › Lấy mã kết nối.
+4. Giám đốc nhập **số điện thoại** cho từng tài khoản (app.tend.vn › Tài khoản › Thiết lập › Người dùng › chọn người ›
+   Điện thoại) — đúng số người đó đăng ký Telegram.
+5. Mỗi người vào app.tend.vn › Tài khoản › Kết nối Telegram › Lấy mã kết nối, nhắn mã cho bot, rồi bấm nút 📱 bot gửi để
+   chia sẻ số điện thoại. Số trùng mới kết nối; lộ mã cũng không sao (khác số thì bị từ chối, Giám đốc được báo).
 
 Muốn dùng chung bot cũ thay vì bot mới: chép dòng `TELEGRAM_TOKEN=` của `/srv/tend/.env` sang `/srv/tend-v2/.env` rồi
 triển khai lại — từ đó bot trả lời ở bản mới, bản cũ thôi nhận báo cáo qua chat.

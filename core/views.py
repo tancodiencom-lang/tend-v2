@@ -23,9 +23,11 @@ def shell(request):
     # Báo cáo: mọi vai (phần tiền theo quyền)
     tabs.append({"key": "reports", "label": "Báo cáo", "url": reverse("reports"), "match": ("reports", "money_")})
     tabs.append({"key": "assistant", "label": "Trợ lý", "url": reverse("assistant")})
-    tabs.append({"key": "account", "label": user.first_name or user.get_full_name() or user.username, "url": reverse("account"),
-                 "person": True, "avatar": reverse("user_avatar", args=[user.pk]) if user.avatar else "",
-                 "initials": initials(user), "title": f"{user} · {user.username} · tài khoản"})
+    role = "Giám đốc" if user.is_superuser else user.get_role_display()
+    tabs.append({"key": "account", "label": user.first_name or user.get_full_name() or user.username, "role": role,
+                 "url": reverse("account"), "person": True,
+                 "avatar": reverse("user_avatar", args=[user.pk]) if user.avatar else "",
+                 "initials": initials(user), "title": f"{user} · {role} · đăng nhập {user.username}"})
     match = getattr(request, "resolver_match", None)
     current = (match.url_name or "") if match else ""
     for tab in tabs:

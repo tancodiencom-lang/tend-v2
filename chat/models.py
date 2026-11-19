@@ -36,6 +36,11 @@ class LinkCode(models.Model):
     digest = models.CharField(max_length=64, unique=True)
     expires_at = models.DateTimeField()
     used_at = models.DateTimeField(null=True, blank=True)
+    # Nhập mã xong còn bước 2: chia sẻ số điện thoại Telegram, phải trùng số công ty ghi ở tài khoản
+    claimed_by = models.CharField(max_length=64, blank=True)
+    claimed_chat = models.CharField(max_length=64, blank=True)
+    claimed_name = models.CharField(max_length=200, blank=True)
+    linked_at = models.DateTimeField(null=True, blank=True)
 
 
 class ChatUpdate(models.Model):
