@@ -1,0 +1,9 @@
+[Unit]
+Description=Chep tai lieu goc len Google Drive moi gio (phut 41)
+
+[Timer]
+OnCalendar=*-*-* *:41:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

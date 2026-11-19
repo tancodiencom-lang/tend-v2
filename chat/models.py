@@ -88,7 +88,11 @@ class ChatPhoto(models.Model):
     image = models.FileField(upload_to=chat_photo_path)
     target = models.CharField(max_length=40, blank=True)
     prompt_message_id = models.BigIntegerField(null=True, blank=True)
+    caption = models.CharField("Chú thích kèm ảnh", max_length=1000, blank=True)
     received_at = models.DateTimeField(auto_now_add=True)
+    # Kho tài liệu gốc (chat/archive.py): đường dẫn tương đối trong thư mục xuất, đặt một lần, không đổi
+    archived_as = models.CharField(max_length=400, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["pk"]

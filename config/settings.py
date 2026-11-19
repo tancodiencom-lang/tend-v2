@@ -79,6 +79,8 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = Path(env("STATIC_ROOT", default=str(BASE_DIR / "staticfiles")))
 MEDIA_URL = "/tep/"
 MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
+# Kho tài liệu gốc xếp theo ngày (chat/archive.py), đồng bộ lên Google Drive bằng ha-tang/dong-bo-goc.sh
+TEND_ORIGINALS_DIR = Path(env("TEND_ORIGINALS_DIR", default="") or MEDIA_ROOT.parent / "tai-lieu-goc")
 
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False

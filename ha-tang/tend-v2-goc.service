@@ -1,0 +1,10 @@
+[Unit]
+Description=Kho tai lieu goc Tend moi: xep anh/chung tu theo ngay, chep len Google Drive
+After=network-online.target postgresql.service
+Wants=network-online.target
+OnFailure=tend-canh-bao@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /srv/tend-v2/app/ha-tang/dong-bo-goc.sh
+Nice=10

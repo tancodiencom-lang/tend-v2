@@ -445,3 +445,103 @@ class MoneyBotTests(BotCase):
         text = self.texts(self.chats[self.director.pk])[-1]
         self.assertIn("TÓM TẮT THU CHI", text)
         self.assertIn("chi 500.000 ₫", text)
+
+
+class ArchiveTests(BotCase):
+    """Kho tài liệu gốc: ảnh nhận qua chat xếp theo loại/ngày, danh sách CSV, ảnh dạng tệp."""
+
+    def setUp(self):
+        super().setUp()
+        from money.models import Party
+        Party.objects.create(name="Cát Hùng Vương", type="ncc")
+        self.finance = User.objects.create_user("ktt", password="x-123-abcd", role=Role.FINANCE_ACCOUNTANT)
+        Member.objects.create(project=self.project, user=self.finance)
+        self.connect(self.finance)
+        self.out = tempfile.mkdtemp(prefix="tend-goc-")
+        patcher = override_settings(TEND_ORIGINALS_DIR=self.out)
+        patcher.enable()
+        self.addCleanup(patcher.disable)
+
+    def files(self):
+        from pathlib import Path
+        return sorted(str(p.relative_to(self.out)) for p in Path(self.out).rglob("*") if p.is_file())
+
+    def csv_text(self, relative):
+        from pathlib import Path
+        return (Path(self.out) / relative).read_text(encoding="utf-8-sig")
+
+    def test_confirmed_photos_filed_by_type_and_day_with_index(self):
+        import os
+        from pathlib import Path
+
+        from chat import archive
+        from chat.models import ChatPhoto
+        day = timezone.localdate()
+        month = f"{day:%Y-%m}"
+        self.message(self.site, "T1.2", photo="a1")
+        self.message(self.site, "TN-22 T1.2 40%")
+        self.press(self.site, f"ok:{self.proposal().pk}")
+        self.message(self.accountant, "", photo="phieu1")
+        self.message(self.accountant, "trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng đợt 2")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        self.message(self.finance, "thu khách 30tr TN-22 PT01 ck - khách chuyển khoản đợt 1")     # chỉ có chữ
+        self.press(self.finance, f"mp:{str(self.proposal().pk)[:8]}:0:n-khach")
+        self.press(self.finance, f"ok:{self.proposal().pk}")
+        self.assertEqual(archive.export(), 2)
+        site_photo, voucher = ChatPhoto.objects.order_by("pk")
+        files = self.files()
+        site_dir = f"Hiện trường/TN-22/{month}/{day.isoformat()}"
+        money_dir = f"Chứng từ thu chi/{month}/{day.isoformat()}"
+        customer_dir = f"Thu tiền khách/{month}/{day.isoformat()}"
+        self.assertEqual(files, sorted([
+            f"{customer_dir}/danh-sach.csv", f"{money_dir}/danh-sach.csv", f"{site_dir}/danh-sach.csv",
+            site_photo.archived_as, voucher.archived_as]))
+        self.assertTrue(site_photo.archived_as.startswith(f"{site_dir}/"))
+        self.assertTrue(site_photo.archived_as.endswith(f"_Minh_T1.2_{site_photo.pk}.jpg"))
+        self.assertTrue(voucher.archived_as.endswith(f"_PC12_{voucher.pk}.jpg"))
+        copied = Path(self.out) / site_photo.archived_as
+        self.assertEqual(copied.read_bytes(), Path(site_photo.image.path).read_bytes())          # nguyên byte
+        self.assertEqual(os.stat(copied).st_ino, os.stat(site_photo.image.path).st_ino)          # liên kết cứng
+        money_csv = self.csv_text(f"{money_dir}/danh-sach.csv")
+        self.assertIn("5.000.000 ₫", money_csv)
+        self.assertIn("Cát Hùng Vương", money_csv)
+        self.assertIn("cát vàng đợt 2", money_csv)
+        self.assertNotIn("khách chuyển khoản", money_csv)                  # thu khách để thư mục riêng
+        customer_csv = self.csv_text(f"{customer_dir}/danh-sach.csv")
+        self.assertIn("30.000.000 ₫", customer_csv)
+        self.assertIn("(chỉ có chữ)", customer_csv)
+        self.assertIn("TN-22 T1.2 40%", self.csv_text(f"{site_dir}/danh-sach.csv"))
+        self.assertEqual(archive.export(), 0)                               # chạy lại: không chép trùng
+        self.assertEqual(self.files(), files)
+
+    def test_loose_and_pending_photos_wait_then_go_to_unrecorded(self):
+        from chat import archive
+        from chat.models import ChatPhoto
+        self.message(self.accountant, "", photo="le1")                    # ảnh lẻ, không ai lập phiếu
+        self.message(self.site, "S1.1", photo="cho1")
+        self.message(self.site, "TN-22 S1.1 50%")                          # phiếu chờ xác nhận
+        self.assertEqual(archive.export(), 0)                               # chưa chốt: chưa xuất
+        later = timezone.now() + timedelta(hours=26)
+        self.assertEqual(archive.export(now=later), 2)
+        loose, pending = ChatPhoto.objects.order_by("pk")
+        day = timezone.localdate()
+        self.assertTrue(loose.archived_as.startswith(f"Chưa ghi phiếu/{day:%Y-%m}/{day.isoformat()}/"))
+        self.assertIn("_chưa gắn phiếu_", loose.archived_as)
+        self.assertIn("_phiếu hết hạn_", pending.archived_as)
+        index = self.csv_text(f"Chưa ghi phiếu/{day:%Y-%m}/{day.isoformat()}/danh-sach.csv")
+        self.assertIn("Hết hạn, không ghi", index)
+        self.assertIn("TN-22 S1.1 50%", index)
+
+    def test_image_file_kept_other_files_refused(self):
+        from chat.models import ChatPhoto
+
+        def send(document):
+            bot.handle_update({"update_id": next(self.update_id), "message": {
+                "message_id": next(self.next_id), "chat": {"id": int(self.chats[self.accountant.pk]), "type": "private"},
+                "from": {"id": self.accountant.pk + 9000}, "document": document, "caption": "phiếu chi viết tay"}})
+        send({"file_id": "goc1", "file_unique_id": "goc1", "file_size": 100, "mime_type": "image/png"})
+        photo = ChatPhoto.objects.get()
+        self.assertEqual(photo.caption, "phiếu chi viết tay")
+        send({"file_id": "pdf1", "file_unique_id": "pdf1", "file_size": 100, "mime_type": "application/pdf"})
+        self.assertEqual(ChatPhoto.objects.count(), 1)
+        self.assertIn("JPG, PNG hoặc WEBP", self.texts()[-1])
