@@ -2,16 +2,19 @@
 {% block content %}
 <p><a href="{% url 'account' %}">‹ Tài khoản</a></p>
 <h1>Nhân viên</h1>
-<p class="muted">Số điện thoại phải đúng số người đó dùng đăng ký Telegram: khi kết nối, bot hỏi số qua nút 📱 của Telegram và chỉ
-kết nối khi trùng số ở đây. Thêm tài khoản, đổi vai, giao công trình: Tài khoản › Thiết lập.</p>
+<p class="muted">Mỗi người một tài khoản, một vai; vai quyết định xem/nhập gì, công trình được giao quyết định thấy công trình nào
+(Giám đốc thấy tất cả). Số điện thoại phải đúng số người đó dùng cho Telegram (bot xác minh khi kết nối). Nghỉ việc thì
+<b>khoá</b>, không xoá — lịch sử giữ nguyên. Mọi thay đổi có nhật ký.</p>
 {% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
-<div class="scroll"><table class="grid"><thead><tr><th>Người</th><th>Vai</th><th>Đăng nhập</th><th>Telegram</th><th>Số điện thoại</th></tr></thead><tbody>
-{% for row in rows %}{% with u=row.user %}<tr>
-  <td>{{ u }}</td><td>{% if u.is_superuser %}Giám đốc{% else %}{{ u.get_role_display }}{% endif %}</td><td>{{ u.username }}</td>
-  <td>{% if row.linked %}✓ Đã kết nối{% elif u.phone %}● Chưa kết nối{% else %}▼ Thiếu số, chưa kết nối được{% endif %}</td>
-  <td><form method="post" class="acts">{% csrf_token %}<input type="hidden" name="nguoi" value="{{ u.pk }}">
-    <input name="dien_thoai" value="{{ u.phone }}" inputmode="tel" placeholder="nhập số, vd 09xx xxx xxx" aria-label="Số điện thoại {{ u }}">
-    <button class="btn plain" type="submit">Lưu</button></form></td>
+<p><a class="btn" href="{% url 'staff_new' %}">+ Thêm tài khoản</a></p>
+<div class="scroll"><table class="grid"><thead><tr><th>Người</th><th>Vai</th><th>Đăng nhập</th><th>Công trình</th><th>Số điện thoại</th><th>Telegram</th><th></th></tr></thead><tbody>
+{% for row in rows %}{% with u=row.user %}<tr{% if not u.is_active %} class="void"{% endif %}>
+  <td>{{ u }}{% if not u.is_active %} <b>(đã khoá)</b>{% endif %}</td>
+  <td>{% if u.is_superuser %}Giám đốc{% else %}{{ u.get_role_display }}{% endif %}</td><td>{{ u.username }}{% if u.must_change_password %}<br><span class="muted">chờ đổi mật khẩu tạm</span>{% endif %}</td>
+  <td>{% if u.is_director %}Tất cả{% else %}{{ row.projects|join:", "|default:"▼ chưa giao" }}{% endif %}</td>
+  <td>{{ u.phone|default:"▼ thiếu" }}</td>
+  <td>{% if row.linked %}✓ Đã kết nối{% elif u.phone %}● Chưa kết nối{% else %}▼ Chưa kết nối được{% endif %}</td>
+  <td><a class="btn plain" href="{% url 'staff_edit' u.pk %}">Sửa</a></td>
 </tr>{% endwith %}{% endfor %}
 </tbody></table></div>
 {% endblock %}

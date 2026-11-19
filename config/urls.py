@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
 
+from core import staff_views
 from core import views as core_views
 from overview import views as overview_views
 
@@ -20,7 +21,10 @@ urlpatterns = [
     path("", include("field.urls")),
     path("", include("money.urls")),
     path("tai-khoan/", overview_views.account, name="account"),
-    path("nhan-vien/", core_views.staff, name="staff"),
+    path("nhan-vien/", staff_views.staff, name="staff"),
+    path("nhan-vien/them/", staff_views.staff_new, name="staff_new"),
+    path("nhan-vien/<int:pk>/", staff_views.staff_edit, name="staff_edit"),
+    path("doi-mat-khau/", staff_views.password, name="password"),
     path("nhan-vien/<int:pk>/anh/", core_views.avatar, name="user_avatar"),
     path("bao-cao/tai/tong-quan/", overview_views.export_overview, name="reports_overview_xlsx"),
     path("bao-cao/tai/thang/", overview_views.export_month, name="reports_month_xlsx"),

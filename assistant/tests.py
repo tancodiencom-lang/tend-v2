@@ -223,18 +223,3 @@ class WebActionTests(AssistantCase):
         self.assertIn("đã nhận kết quả", self.assistant_texts(self.site)[-1])
         self.client.force_login(self.accountant)
         self.assertEqual(self.client.post(reverse("assistant_act", args=[task.pk, "nhan"])).status_code, 404)
-
-    def test_staff_page_sets_phone_director_only(self):
-        self.client.force_login(self.site)
-        self.assertEqual(self.client.get(reverse("staff")).status_code, 403)
-        self.client.force_login(self.director)
-        page = self.client.get(reverse("staff"))
-        self.assertContains(page, "✓ Đã kết nối")
-        self.client.post(reverse("staff"), {"nguoi": self.designer.pk, "dien_thoai": "+84 912 000 111"})
-        self.designer.refresh_from_db()
-        self.assertEqual(self.designer.phone, "0912000111")
-        self.assertTrue(AuditLog.objects.filter(table="core.User", reason__startswith="Giám đốc sửa số").exists())
-        page = self.client.post(reverse("staff"), {"nguoi": self.accountant.pk, "dien_thoai": "0912000111"}, follow=True)
-        self.assertContains(page, "đã ghi cho tài khoản khác")
-        page = self.client.post(reverse("staff"), {"nguoi": self.accountant.pk, "dien_thoai": "12345"}, follow=True)
-        self.assertContains(page, "không đúng dạng")

@@ -57,33 +57,3 @@ def avatar(request, pk):
         raise Http404
     response["Cache-Control"] = "private, max-age=3600"
     return response
-
-
-
-@login_required
-def staff(request):
-    """Nhân viên (chỉ Giám đốc): số điện thoại dùng xác minh Telegram và tình trạng kết nối. Sửa số có nhật ký."""
-    from django.contrib import messages
-    from django.core.exceptions import PermissionDenied
-    from django.shortcuts import render
-
-    from .audit import record_save
-    from .text import phone as phone_digits
-    if not request.user.is_director:
-        raise PermissionDenied("Trang này dành cho Giám đốc.")
-    if request.method == "POST":
-        person = get_object_or_404(User, pk=request.POST.get("nguoi"))
-        number = phone_digits(request.POST.get("dien_thoai"))
-        if number and not (len(number) == 10 and number.startswith("0")):
-            messages.error(request, f"Số \"{request.POST.get('dien_thoai')}\" không đúng dạng số di động 10 chữ số (vd 0912345678).")
-        elif number and any(phone_digits(u.phone) == number for u in User.objects.filter(is_active=True).exclude(pk=person.pk)):
-            messages.error(request, f"Số {number} đã ghi cho tài khoản khác. Mỗi số chỉ dùng cho một người.")
-        elif number != phone_digits(person.phone):
-            person.phone = number
-            record_save(person, request.user, "Giám đốc sửa số điện thoại (xác minh Telegram)")
-            messages.success(request, f"Đã lưu số của {person}." + (" Người này cần kết nối Telegram lại nếu đổi số Telegram." if number else ""))
-        return redirect("staff")
-    people = (User.objects.filter(is_active=True).order_by("role", "first_name", "username")
-              .prefetch_related("chat_links"))
-    rows = [{"user": u, "linked": any(link.active for link in u.chat_links.all())} for u in people]
-    return render(request, "core/staff.html", {"rows": rows})

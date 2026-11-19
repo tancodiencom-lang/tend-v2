@@ -23,6 +23,8 @@ class User(AbstractUser):
     objects = Manager()
     role = models.CharField("Vai", max_length=12, choices=Role.choices, default=Role.SUPERVISOR)
     phone = models.CharField("Điện thoại", max_length=20, blank=True)
+    must_change_password = models.BooleanField("Phải đổi mật khẩu khi đăng nhập", default=False,
+                                               help_text="Bật khi Giám đốc đặt mật khẩu tạm.")
     avatar = models.FileField("Ảnh nhân viên", upload_to=avatar_path, blank=True,
                               help_text="Hiện cạnh tên ở thanh mục; ảnh cũ giữ trong thư mục, không xoá.")
 
