@@ -180,6 +180,32 @@ Giám đốc giao việc: nhắn bot `/giao Nam gửi bản vẽ điện TN-22 h
 đã bật AI), bấm ✓ Xác nhận. Đổi ngày làm việc: thêm `TEND_WORK_DAYS=1,2,3,4,5` (thứ Hai–thứ Sáu) vào `/srv/tend-v2/.env`.
 Chạy thử một lượt: `sudo -u tendv2 bash -c 'cd /srv/tend-v2/app && .venv/bin/python manage.py tro_ly'`.
 
+## Nhóm Telegram nội bộ và hỏi Giám đốc qua trợ lý
+
+1. Cho bot đọc được mọi tin trong nhóm (làm một lần): Telegram › @BotFather › `/setprivacy` › chọn bot › **Disable**.
+   (Không làm bước này thì bot chỉ thấy lệnh và tin gọi @tên bot.) Nhóm đã có bot từ trước: xoá bot khỏi nhóm rồi thêm lại.
+2. Thêm bot vào nhóm (vd nhóm công trường TN-22). Bot tự chào và hướng dẫn.
+3. Giám đốc nhắn trong nhóm: `/nhom TN-22` (nhóm của công trình) hoặc `/nhom chung`. Thôi dùng: `/nhom tat`.
+   Chỉ muốn bot làm khi được gọi: `/nhom khongnghe` (bật lại: `/nhom nghe`).
+4. Mọi người trong nhóm phải đã **kết nối Tend riêng** với bot; người chưa kết nối bot bỏ qua.
+
+Trong nhóm: báo cáo/phiếu bot lập và **gửi riêng** người nhắn bấm Xác nhận; gọi bot (@tên bot) để hỏi tiến độ — trả lời
+trong nhóm **không có số tiền**; câu khó bot hỏi Giám đốc (tin riêng, nút ✍ Tôi trả lời / ✓ Gửi bản nháp) rồi trả lời
+lại trong nhóm. Nhân viên cũng hỏi riêng được: `/hoi <câu hỏi>`.
+
+## Ảnh nhân viên
+
+Mỗi người đổi ảnh ở app.tend.vn › mục có tên mình (cuối thanh dưới) › Ảnh nhân viên. Chép ảnh đã có ở bản cũ (chỉ cho
+người chưa có ảnh; xem trước rồi mới chép):
+
+```bash
+sudo bash /srv/tend-v2/app/ha-tang/chep-anh-nhan-vien.sh
+```
+
+```bash
+sudo bash /srv/tend-v2/app/ha-tang/chep-anh-nhan-vien.sh --thuc-hien
+```
+
 ## Các lần sau: nút Triển khai trên GitHub (tuỳ chọn, như bản cũ)
 
 Trên máy tính của anh tạo một cặp khoá mới (không đặt passphrase), khoá **công khai** cài lên máy chủ:

@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from assistant import parse as task_parse
 from assistant import services as tasks
-from assistant.models import Feedback, Task
+from assistant.models import Feedback, Question, Task
 from core.models import User
 from projects.models import Project, projects_for
 
@@ -19,10 +19,11 @@ from . import telegram
 from .models import ChatLink, Proposal
 
 PREFIX = "🤖 Trợ lý: "
-COMMANDS = ("/giao", "/viec", "/xong", "/huyviec", "/gopy")
+COMMANDS = ("/giao", "/viec", "/xong", "/huyviec", "/gopy", "/hoi")
 HELP = ("• Trợ lý: /viec (việc được giao, Giám đốc xem tất cả), /xong 12 [ghi chú] (báo xong việc #12), /gopy <góp ý>. "
         "Giám đốc giao việc: \"/giao Nam gửi bản vẽ điện TN-22 hạn 20/11 9:00 - đủ ổ cắm, công tắc\" hoặc nói tự nhiên khi "
-        "đã bật AI; /huyviec 12 lý do.")
+        "đã bật AI; /huyviec 12 lý do.\n• Hỏi Giám đốc qua trợ lý: /hoi <câu hỏi> — trợ lý chuyển Giám đốc và trả lời lại đúng chỗ hỏi "
+        "(trong nhóm hoặc tin riêng).")
 
 
 def _tell(user, text, buttons=None):
@@ -153,6 +154,12 @@ def handle(link_row, command, text, state_set):
         task = tasks.cancel(user, task, reason)
         _tell(task.owner, f"Giám đốc huỷ việc #{task.pk} \"{task.title}\": {task.close_note}. Không cần làm tiếp.")
         return f"Đã huỷ việc #{task.pk}.", None
+    if command == "/hoi":
+        if user.is_director:
+            return "Anh là Giám đốc: câu hỏi này anh tự quyết. /hoi để nhân viên hỏi anh qua trợ lý.", None
+        question = tasks.ask_director(user, arg, link_row.chat_id, "tin nhắn riêng")
+        transaction.on_commit(lambda: notify_question(question))
+        return "Đã chuyển câu hỏi cho Giám đốc. Trợ lý sẽ nhắn lại câu trả lời ở đây.", None
     if command == "/gopy":
         tasks.add_feedback(user, arg, context="bot /gopy")
         return "Cảm ơn anh/chị. Trợ lý đã ghi góp ý; sáng thứ Hai Giám đốc nhận tổng hợp.", None
@@ -197,3 +204,59 @@ def friction(user, text, context):
         tasks.add_feedback(user, text, kind=Feedback.Kind.FRICTION, context=context)
     except ValidationError:
         pass
+
+
+# ---------- câu hỏi chờ Giám đốc: hỏi → Giám đốc trả lời/duyệt nháp → trợ lý trả lời lại đúng chỗ ----------
+
+def escalate(user, text, chat_id, where, message_id=None, project=None, draft=""):
+    question = tasks.ask_director(user, text, chat_id, where, message_id, project, draft)
+    transaction.on_commit(lambda: notify_question(question))
+    return question
+
+
+def notify_question(question):
+    buttons = [[{"text": "✓ Gửi bản nháp", "data": f"qa:{question.pk}"}]] if question.draft else []
+    buttons.append([{"text": "✍ Tôi trả lời", "data": f"qw:{question.pk}"}, {"text": "× Không cần", "data": f"qx:{question.pk}"}])
+    _tell_directors("\n".join(filter(None, [
+        f"CÂU HỎI CHỜ ANH #{question.pk} · {question.where} · từ {question.asked_by}",
+        question.text,
+        f"\nBản nháp trợ lý soạn: {question.draft}" if question.draft else "",
+        "Anh bấm ✍ Tôi trả lời rồi nhắn câu trả lời; trợ lý gửi lại đúng chỗ hỏi."])), buttons)
+
+
+def post_answer(question):
+    text = f"Giám đốc trả lời câu hỏi của {question.asked_by}:\n{question.answer}"
+    telegram.send(question.chat_id, PREFIX + text, reply_to=question.message_id)
+
+
+def answer_text(link_row, question_id, text):
+    question = Question.objects.filter(pk=question_id).first()
+    if question is None:
+        return "Không tìm thấy câu hỏi."
+    question = tasks.answer_question(link_row.user, question, text)
+    transaction.on_commit(lambda: post_answer(question))
+    return f"✓ Đã gửi câu trả lời #{question.pk} tới {question.where}."
+
+
+def question_callback(link_row, kind, value, state_set):
+    question = Question.objects.filter(pk=int(value) if str(value).isdecimal() else 0).first()
+    if question is None:
+        return "Không tìm thấy câu hỏi."
+    try:
+        if kind == "qa":
+            if not question.draft:
+                return "Câu hỏi này không có bản nháp."
+            return answer_text(link_row, question.pk, question.draft)
+        if kind == "qw":
+            if not link_row.user.is_director or question.state != Question.State.OPEN:
+                return "Câu hỏi này không chờ anh trả lời."
+            state_set(answer_question=str(question.pk))
+            return f"Nhắn câu trả lời cho câu hỏi #{question.pk}."
+        if kind == "qx":
+            question = tasks.drop_question(link_row.user, question)
+            _tell(question.asked_by, f"Giám đốc đã xem câu hỏi \"{question.text[:120]}\": không cần trả lời qua trợ lý.")
+            return f"✓ Đã đóng câu hỏi #{question.pk}."
+    except (PermissionDenied, ValidationError) as error:
+        return "; ".join(getattr(error, "messages", [str(error)]))
+    return "Không rõ thao tác."
+

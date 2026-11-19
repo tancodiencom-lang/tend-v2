@@ -71,3 +71,31 @@ class Notice(models.Model):
 
     class Meta:
         ordering = ["-sent_at"]
+
+
+class Question(models.Model):
+    """Câu hỏi trợ lý không tự trả lời được: hỏi Giám đốc, Giám đốc trả lời (hoặc duyệt bản nháp), trợ lý trả lời lại đúng chỗ."""
+
+    class State(models.TextChoices):
+        OPEN = "open", "Chờ Giám đốc"
+        ANSWERED = "answered", "Đã trả lời"
+        DROPPED = "dropped", "Không cần trả lời"
+
+    asked_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="Người hỏi", on_delete=models.PROTECT, related_name="+")
+    chat_id = models.CharField("Hỏi ở (mã chat)", max_length=64)
+    where = models.CharField("Hỏi ở", max_length=200, blank=True)
+    message_id = models.BigIntegerField(null=True, blank=True)
+    project = models.ForeignKey(Project, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    text = models.TextField("Câu hỏi", max_length=2000)
+    draft = models.TextField("Bản nháp trả lời", max_length=2000, blank=True)
+    state = models.CharField(max_length=10, choices=State.choices, default=State.OPEN)
+    answer = models.TextField("Trả lời", max_length=3000, blank=True)
+    answered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    answered_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Câu hỏi chờ Giám đốc"
+        verbose_name_plural = "Câu hỏi chờ Giám đốc"
+        ordering = ["-created_at"]
+

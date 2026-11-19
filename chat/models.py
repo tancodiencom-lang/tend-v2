@@ -9,6 +9,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.db import models
 
+from core.models import User
 from projects.models import Project
 
 
@@ -104,3 +105,53 @@ class AiUsage(models.Model):
     input_tokens = models.BigIntegerField(default=0)
     output_tokens = models.BigIntegerField(default=0)
     calls = models.IntegerField(default=0)
+
+
+class Group(models.Model):
+    """Nhóm Telegram nội bộ có bot. Giám đốc gắn nhóm với công trình bằng /nhom TN-22 (hoặc /nhom chung)."""
+    chat_id = models.CharField(max_length=64, unique=True)
+    title = models.CharField("Tên nhóm", max_length=200, blank=True)
+    project = models.ForeignKey(Project, verbose_name="Công trình", on_delete=models.PROTECT, null=True, blank=True,
+                                related_name="+")
+    active = models.BooleanField("Đang dùng", default=False)
+    listening = models.BooleanField("Nghe tin trong nhóm", default=True,
+                                    help_text="Tự nhận báo cáo/phiếu theo cú pháp (gửi riêng người nhắn xác nhận).")
+    linked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    linked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Nhóm Telegram"
+        verbose_name_plural = "Nhóm Telegram"
+
+    def __str__(self):
+        return self.title or self.chat_id
+
+
+class GroupViewer(User):
+    """Quyền đọc khi trả lời TRONG NHÓM: mọi người trong nhóm cùng đọc nên không có phần tiền, và chỉ công trình của nhóm."""
+    only_project_id = None
+
+    class Meta:
+        proxy = True
+
+    @property
+    def sees_payables(self):
+        return False
+
+    @property
+    def sees_receivables(self):
+        return False
+
+    @property
+    def sees_profit(self):
+        return False
+
+    @classmethod
+    def of(cls, user, project=None):
+        viewer = cls()
+        viewer.__dict__.update({k: v for k, v in user.__dict__.items() if not k.startswith("_")})
+        viewer._state = user._state
+        viewer.only_project_id = project.pk if project else None
+        return viewer
+

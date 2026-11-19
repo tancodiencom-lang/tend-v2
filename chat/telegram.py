@@ -66,10 +66,12 @@ def keyboard(buttons):
     return {'inline_keyboard': [[{'text': b['text'][:60], 'callback_data': b['data'][:64]} for b in row] for row in buttons]}
 
 
-def send(chat_id, text, buttons=None):
+def send(chat_id, text, buttons=None, reply_to=None):
     data = {'chat_id': chat_id, 'text': text[:4000], 'disable_web_page_preview': True}
     if buttons:
         data['reply_markup'] = keyboard(buttons)
+    if reply_to:
+        data['reply_parameters'] = {'message_id': int(reply_to), 'allow_sending_without_reply': True}
     return post('sendMessage', data)
 
 
@@ -113,5 +115,5 @@ def download(file_id):
 
 
 def set_webhook(url, secret):
-    return post('setWebhook', {'url': url, 'secret_token': secret, 'allowed_updates': ['message', 'callback_query'],
+    return post('setWebhook', {'url': url, 'secret_token': secret, 'allowed_updates': ['message', 'callback_query', 'my_chat_member'],
                                'drop_pending_updates': False})

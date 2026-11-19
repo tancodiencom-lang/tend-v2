@@ -2,6 +2,8 @@
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
 
+from .avatar import avatar_path
+
 
 class Role(models.TextChoices):
     DIRECTOR = "director", "Giám đốc"
@@ -21,6 +23,8 @@ class User(AbstractUser):
     objects = Manager()
     role = models.CharField("Vai", max_length=12, choices=Role.choices, default=Role.SUPERVISOR)
     phone = models.CharField("Điện thoại", max_length=20, blank=True)
+    avatar = models.FileField("Ảnh nhân viên", upload_to=avatar_path, blank=True,
+                              help_text="Hiện cạnh tên ở thanh mục; ảnh cũ giữ trong thư mục, không xoá.")
 
     class Meta:
         verbose_name = "Người dùng"

@@ -114,10 +114,12 @@ class LinkTests(BotCase):
         self.assertIn("chưa kết nối", self.texts()[-1])
         self.assertTrue(AuditLog.objects.filter(table="chat.ChatLink", reason="Ngắt kết nối Telegram").exists())
 
-    def test_group_chat_ignored_and_update_once(self):
+    def test_unlinked_group_only_hints_and_update_once(self):
         bot.handle_update({"update_id": 5000, "message": {"chat": {"id": 1, "type": "group"}, "from": {"id": 1}, "text": "/tongquan"}})
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("chưa được gắn với Tend", self.sent[0][1]["text"])       # không trả số liệu trong nhóm chưa gắn
         bot.handle_update({"update_id": 5000, "message": {"chat": {"id": 1, "type": "private"}, "from": {"id": 1}, "text": "x"}})
-        self.assertEqual(self.sent, [])
+        self.assertEqual(len(self.sent), 1)                                    # cùng update_id: bỏ qua
 
     def test_webhook_secret(self):
         url = reverse("chat_telegram", args=[telegram.webhook_secret()])
