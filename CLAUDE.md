@@ -140,3 +140,7 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - Trang `/tho/` thành **Nhân sự**: thêm (mã tự cấp), sửa họ tên/nghề/bậc/tổ/hình thức trả/đơn giá + **áp dụng từ ngày**, lịch sử đơn giá, đã nghỉ. Trang Tài khoản › Nhân viên đổi tên **Tài khoản đăng nhập**.
 - 115/115 bài kiểm trên SQLite và PostgreSQL 16; migration chạy trên CSDL diễn tập chép từ bản cũ.
 
+## Nhập bù phiếu thu chi cũ (20/11/2026)
+
+- Chủ dự án nhập chứng từ nộp tiền tháng 8 bị chặn ("chỉ nhập phiếu trong 62 ngày"). Sổ tiền bản cũ không chép sang nên cần nhập bù: `money.services.check_date` nay cho tới **2 năm** (`MAX_DAYS_BACK = 730`, quá thì báo kiểm lại năm); phiếu cũ hơn `RECENT_DAYS = 62` vẫn ghi nhưng phiếu chờ xác nhận hiện "⚠ Nhập bù: phiếu cũ N ngày. Kiểm tra kỳ này trên MISA đã khoá sổ chưa trước khi xuất MISA" (`backfill_days`).
+

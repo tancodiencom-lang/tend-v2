@@ -649,3 +649,31 @@ class WorkerPageAddTests(BotCase):
         self.assertIsNone(Worker.objects.get(name="Tuấn").day_rate)              # giám sát thêm thợ, không đặt giá
         self.client.force_login(self.designer)
         self.assertEqual(self.client.post(reverse("field_workers"), {"action": "add", "name": "X"}).status_code, 403)
+
+
+class BackfillTests(BotCase):
+    """Nhập bù chứng từ cũ (chủ dự án 20/11/2026: phiếu nộp tiền tháng 8 bị chặn bởi giới hạn 62 ngày)."""
+
+    def setUp(self):
+        super().setUp()
+        from money.models import Party
+        Party.objects.create(name="Cát Hùng Vương", type="ncc")
+
+    def entries(self):
+        from money.models import Entry
+        return Entry.objects.order_by("pk")
+
+    def test_old_receipt_allowed_with_warning_and_wrong_year_refused(self):
+        from datetime import date as d
+        old = timezone.localdate() - timedelta(days=97)
+        self.message(self.accountant, f"trả NCC 5tr Cát Hùng Vương TN-22 PC08 ck {old:%d/%m/%Y} - nộp tiền tháng 8")
+        proposal = self.proposal()
+        self.assertEqual(proposal.payload["entries"][0]["date"], old.isoformat())
+        self.assertIn("⚠ Nhập bù: phiếu cũ 97 ngày", bot.summary(proposal))
+        self.press(self.accountant, f"ok:{proposal.pk}")
+        self.assertEqual(self.entries().get().date, old)
+        self.message(self.accountant, "trả NCC 1tr Cát Hùng Vương TN-22 PC09 01/01/2020")
+        self.assertIn("hơn 2 năm", self.texts()[-1])
+        self.assertEqual(self.entries().count(), 1)
+        self.message(self.accountant, f"trả NCC 2tr Cát Hùng Vương TN-22 PC10 {d.today():%d/%m/%Y}")
+        self.assertNotIn("Nhập bù", bot.summary(self.proposal()))
