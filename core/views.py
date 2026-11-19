@@ -16,6 +16,7 @@ def shell(request):
         tabs.append({"key": "field_attendance", "label": "Công", "url": reverse("field_attendance")})
     # Báo cáo: mọi vai (phần tiền theo quyền)
     tabs.append({"key": "reports", "label": "Báo cáo", "url": reverse("reports"), "match": ("reports", "money_")})
+    tabs.append({"key": "assistant", "label": "Trợ lý", "url": reverse("assistant")})
     tabs.append({"key": "account", "label": "Tài khoản", "url": reverse("account")})
     match = getattr(request, "resolver_match", None)
     current = (match.url_name or "") if match else ""

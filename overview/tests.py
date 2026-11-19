@@ -142,8 +142,8 @@ class OverviewPageTests(Fixture, TestCase):
 
     def test_tabs_by_role(self):
         tabs = lambda user: [t["label"] for t in self.page(user).context["tabs"]]
-        self.assertEqual(tabs(self.site), ["Tổng quan", "Bản vẽ", "Báo cáo", "Tài khoản"])
-        self.assertEqual(tabs(self.users[Role.INTERNAL_ACCOUNTANT]), ["Tổng quan", "Công", "Báo cáo", "Tài khoản"])
+        self.assertEqual(tabs(self.site), ["Tổng quan", "Bản vẽ", "Báo cáo", "Trợ lý", "Tài khoản"])
+        self.assertEqual(tabs(self.users[Role.INTERNAL_ACCOUNTANT]), ["Tổng quan", "Công", "Báo cáo", "Trợ lý", "Tài khoản"])
 
 
 class AuditTests(Fixture, TestCase):

@@ -1,0 +1,9 @@
+[Unit]
+Description=Tro ly Giam doc chay moi 10 phut
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=false
+
+[Install]
+WantedBy=timers.target

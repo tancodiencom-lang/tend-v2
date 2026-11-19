@@ -106,7 +106,7 @@ systemctl is-active tend-v2 tend
 systemctl list-timers 'tend*'
 ```
 
-Phải thấy `tend-v2-saoluu.timer` (02:30), `tend-v2-tomtat.timer` (18:13) `tend-v2-goc.timer` (mỗi giờ, phút 41), `tend-v2-kiemtra.timer` (08:07) và `tend-v2-khoiphuc.timer` (ngày 3 hằng tháng). Chạy thử sao lưu một lần:
+Phải thấy `tend-v2-saoluu.timer` (02:30), `tend-v2-goc.timer` (mỗi giờ, phút 41), `tend-v2-kiemtra.timer` (08:07), `tend-v2-khoiphuc.timer` (ngày 3 hằng tháng) và `tend-v2-troly.timer` (mỗi 10 phút). Chạy thử sao lưu một lần:
 
 ```bash
 sudo systemctl start tend-v2-saoluu && tail -3 /var/log/tend-v2-saoluu.log
@@ -162,6 +162,24 @@ sudo bash /srv/tend-v2/app/ha-tang/thu-khoi-phuc.sh
 sudo systemctl start tend-v2-kiemtra
 ```
 
+## Trợ lý Giám đốc
+
+Triển khai xong là trợ lý chạy (hẹn giờ `tend-v2-troly.timer`, mỗi 10 phút), dùng chính bot Telegram của Tend mới. Mọi người
+cần **kết nối Telegram** (Tài khoản › Kết nối Telegram) thì trợ lý mới nhắn được; bản tin sáng liệt kê ai chưa kết nối.
+
+| Giờ (thứ Hai–thứ Bảy) | Trợ lý làm |
+|---|---|
+| 07:30 | Bản tin sáng cho Giám đốc; việc hôm nay cho từng người |
+| 16:00, 17:00 | Nhắc giám sát công trình chưa có báo cáo ngày |
+| 18:00 | Nhắc phiếu chi trong ngày chưa có ảnh chứng từ |
+| 18:30 | Tóm tắt ngày cho Giám đốc (thay tóm tắt thu chi 18:13 cũ) |
+| 19:00 | Báo Giám đốc công trình vẫn chưa có báo cáo |
+| Trong giờ | Nhắc việc sắp đến hạn / quá hạn, báo Giám đốc nếu vẫn trễ sau 4 giờ, cảnh báo Gấp |
+
+Giám đốc giao việc: nhắn bot `/giao Nam gửi bản vẽ điện TN-22 hạn 20/11 9:00 - đủ ổ cắm, công tắc` (hoặc nói tự nhiên khi
+đã bật AI), bấm ✓ Xác nhận. Đổi ngày làm việc: thêm `TEND_WORK_DAYS=1,2,3,4,5` (thứ Hai–thứ Sáu) vào `/srv/tend-v2/.env`.
+Chạy thử một lượt: `sudo -u tendv2 bash -c 'cd /srv/tend-v2/app && .venv/bin/python manage.py tro_ly'`.
+
 ## Các lần sau: nút Triển khai trên GitHub (tuỳ chọn, như bản cũ)
 
 Trên máy tính của anh tạo một cặp khoá mới (không đặt passphrase), khoá **công khai** cài lên máy chủ:
@@ -179,7 +197,7 @@ Không dùng nút thì triển khai tay: `sudo bash /srv/tend-v2/app/ha-tang/tri
 ## Gỡ Tend mới (nếu cần quay lại chỉ dùng bản cũ)
 
 ```bash
-sudo systemctl disable --now tend-v2 tend-v2-saoluu.timer tend-v2-tomtat.timer tend-v2-goc.timer tend-v2-kiemtra.timer tend-v2-khoiphuc.timer
+sudo systemctl disable --now tend-v2 tend-v2-saoluu.timer tend-v2-tomtat.timer tend-v2-goc.timer tend-v2-kiemtra.timer tend-v2-khoiphuc.timer tend-v2-troly.timer
 ```
 
 ```bash

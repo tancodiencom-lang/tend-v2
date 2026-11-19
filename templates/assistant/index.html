@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block title %}Trợ lý{% endblock %}
+{% block content %}
+<h1>Trợ lý Giám đốc</h1>
+<p class="muted">Việc giao qua bot Telegram: Giám đốc nhắn <code>/giao</code> (hoặc nói tự nhiên khi đã bật AI), người làm bấm Nhận việc,
+xong nhắn <code>/xong số</code>, Giám đốc nhận kết quả hoặc trả lại. Trợ lý nhắc trước hạn, nhắc khi trễ và báo Giám đốc nếu vẫn trễ.</p>
+<h2>{% if user.is_director %}Việc đang mở{% else %}Việc của anh/chị{% endif %} ({{ open|length }}{% if late_count %}, ▼ trễ {{ late_count }}{% endif %})</h2>
+{% if open %}<div class="scroll"><table class="grid"><thead><tr><th>Số</th><th>Việc</th><th>Người làm</th><th>Công trình</th><th>Hạn</th><th>Trạng thái</th></tr></thead><tbody>
+{% for row in open %}{% with t=row.task %}<tr>
+  <td>#{{ t.pk }}</td>
+  <td>{{ t.title }}{% if t.criteria %}<br><span class="muted">Xong khi: {{ t.criteria }}</span>{% endif %}{% if t.close_note %}<br><span class="muted">Trả lại: {{ t.close_note }}</span>{% endif %}</td>
+  <td>{{ t.owner }}</td><td>{{ t.project.code|default:"—" }}</td><td>{{ t.due|date:"d/m/Y H:i" }}</td>
+  <td>{% if t.state == "reported" %}↺ Báo xong, chờ Giám đốc nhận{% elif row.late %}▼ Trễ hạn{% elif t.accepted_at %}● Đang làm{% else %}● Chưa bấm nhận{% endif %}</td>
+</tr>{% endwith %}{% endfor %}</tbody></table></div>{% else %}<p>Không có việc nào đang mở.</p>{% endif %}
+{% if closed %}<h2>Đã đóng trong 30 ngày</h2><ul>{% for row in closed %}<li>{{ row.line }}</li>{% endfor %}</ul>{% endif %}
+{% if user.is_director %}<h2>Góp ý và chỗ vướng ({{ feedback|length }} gần nhất)</h2>
+{% if feedback %}<div class="scroll"><table class="grid"><thead><tr><th>Lúc</th><th>Người</th><th>Loại</th><th>Nội dung</th><th>Ở đâu</th></tr></thead><tbody>
+{% for f in feedback %}<tr><td>{{ f.created_at|date:"d/m/Y H:i" }}</td><td>{{ f.author }}</td><td>{{ f.get_kind_display }}</td><td>{{ f.text }}</td><td>{{ f.context }}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<p>Chưa có góp ý. Nhân viên nhắn <code>/gopy nội dung</code> cho bot.</p>{% endif %}{% endif %}
+{% endblock %}

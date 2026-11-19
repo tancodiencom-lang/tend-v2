@@ -36,7 +36,8 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 3. ✓ Bot giám sát: báo cáo, ảnh, lý do giảm, chấm công; bảng công tháng, chi phí công nhật. Xem mục dưới.
 4. ✓ Bot kế toán: phiếu thu/chi (chữ, ảnh phiếu), lệnh tra cứu; xuất MISA. Xem mục dưới.
 5. ✓ Báo cáo tải về (Excel). Xem mục dưới.
-6. Triển khai `app.tend.vn` song song so.tend.vn (cùng máy chủ): mã, script và hướng dẫn xong — [docs/TRIEN-KHAI.md](docs/TRIEN-KHAI.md); chờ chủ dự án chạy trên máy chủ.
+6. ✓ Triển khai `app.tend.vn` song song so.tend.vn (cùng máy chủ) — [docs/TRIEN-KHAI.md](docs/TRIEN-KHAI.md); chủ dự án đã chạy, chép dữ liệu cũ, đăng nhập được.
+7. Trợ lý Giám đốc cơ bản (đợt 7): xem mục dưới. Tiếp: đợt 8 trợ lý thông minh, đợt 9 bán hàng/CSKH, đợt 10 marketing/nội dung số theo tài liệu "Mô tả công việc và quy trình vận hành" (Claude Docs https://claude.ai/artifact/5E46cxMEViuwdmFFBoMLtG).
 
 ## Bản vẽ (đợt 2, 18/11/2026)
 
@@ -93,4 +94,13 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - `ha-tang/thu-khoi-phuc.sh` (`tend-v2-khoiphuc.timer` ngày 3, 03:30): tải bản `hang-ngay` mới nhất, `pg_restore --exit-on-error` vào CSDL tạm `tendv2_thu_khoi_phuc`, so số dòng 8 bảng (không nhiều hơn thật, không rỗng khi thật có), kiểm `.env` và số ảnh trong tar ≥ ảnh trên máy chủ trước giờ sao lưu; luôn xoá CSDL tạm.
 - Cảnh báo riêng của bản mới: `gui-canh-bao.sh` (dùng `/etc/tend/canh-bao.env` của bản cũ), `canh-bao-dich-vu.sh`, `tend-v2-canh-bao@.service`; mọi dịch vụ v2 `OnFailure=tend-v2-canh-bao@`.
 - Diễn tập trên PostgreSQL 16 với rclone giả: sao lưu thật → thử khôi phục đạt; ảnh thiếu trong bản sao lưu và tệp CSDL hỏng đều bị bắt, CSDL tạm luôn xoá; kiểm tra sáng đúng ba tình huống. Chưa chạy trên máy chủ thật.
+
+## Trợ lý Giám đốc — đợt 7 (19/11/2026)
+
+- Theo tài liệu mô tả công việc (trợ lý "cánh tay điều hành": nhắc, hỏi, tổng hợp, cảnh báo; Giám đốc chỉ quyết). Chủ dự án bảo "cứ làm"; các câu hỏi mở được chọn mặc định, Giám đốc chỉnh sau: **chỉ Giám đốc giao việc**; **không có tài khoản trợ lý** (việc ghi nhật ký đứng tên Giám đốc xác nhận, trợ lý không ghi gì khác); tin có tiền chỉ tới Giám đốc (chi vượt thêm kế toán nội bộ của công trình); **ngày làm việc thứ Hai–thứ Bảy** (`TEND_WORK_DAYS`), nhân viên nhận tin 07:00–19:30, Giám đốc 07:00–21:30; ngưỡng theo bảng đề xuất (dự kiến trễ ≥ 7 ngày, chi phí vượt ≥ 10% giá vốn phần đã làm, lãi dự báo âm: Gấp; leo thang sau 4 giờ).
+- Mô-đun `assistant/`: `Task` (việc, người chịu trách nhiệm, công trình, hạn, tiêu chí xong; Đang làm → Báo xong → Giám đốc nhận / trả lại có lý do; huỷ có lý do; không xoá), `Feedback` (góp ý `/gopy` + chỗ vướng bot tự ghi: không hiểu tin, phiếu không ghi được), `Notice` (khoá duy nhất mỗi tin: chạy lại không gửi trùng). Đường ghi `assistant/services.py` (giao dịch + nhật ký, kiểm quyền).
+- Bot (`chat/task_bot.py`): `/giao <người> <việc> [TN-22] hạn 20/11 [9:00] [- tiêu chí]` (`assistant/parse.py`) hoặc AI (`find_people`, `list_tasks`, `propose_task`) → phiếu chờ Giám đốc ✓ Xác nhận → người làm nhận tin + nút 👍 Nhận việc (`tn:`); `/viec`, `/xong 12 [ghi chú]` → Giám đốc ✓ Nhận kết quả (`ta:`) / ↩ Trả lại (`tr:`, nhắn lý do); `/huyviec 12 lý do`; `/gopy`.
+- Lịch (`assistant/schedule.py`, `manage.py tro_ly`, `tend-v2-troly.timer` mỗi 10 phút): 07:30 bản tin sáng Giám đốc (việc cần quyết, cảnh báo, lịch/mốc, việc trễ và trợ lý đã làm gì, người chưa kết nối Telegram; thứ Hai thêm góp ý tuần) + việc hôm nay từng người; nhắc 2 giờ trước hạn, khi quá hạn, chưa bấm nhận sau 4 giờ, leo thang Giám đốc sau 4 giờ; 16:00/17:00 nhắc giám sát công trình chưa có báo cáo, 19:00 báo Giám đốc; 18:00 nhắc phiếu chi thiếu ảnh chứng từ; 18:30 tóm tắt ngày (tiến độ, công, thu chi, việc mở) — **thay tóm tắt thu chi 18:13** (`tend-v2-tomtat.timer` tắt khi triển khai); cảnh báo Gấp mỗi loại mỗi công trình một lần/tuần. Trang `/tro-ly/` (mục Trợ lý): Giám đốc xem mọi việc + góp ý, người khác việc của mình.
+- Chưa làm (cần dữ liệu đợt sau): khách chưa trả đợt đến hạn (chưa có lịch đợt thanh toán), nợ NCC quá hạn hẹn (chưa có hạn trả), năng suất tổ thợ (báo cáo tuần đợt 8), khách mới/tin nhắn khách (đợt 9–10), xếp lịch họp/khảo sát (đợt 8).
+- 2 migration (`assistant.0001`, `chat.0004` thêm loại phiếu Giao việc). 88/88 bài kiểm trên SQLite và PostgreSQL 16. Chưa chạy trên máy chủ thật, chưa thử Telegram/Claude API thật.
 
