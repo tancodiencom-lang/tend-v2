@@ -1,0 +1,10 @@
+[Unit]
+Description=Thu khoi phuc ban sao luu moi nhat cua Tend moi vao CSDL tam
+After=network-online.target postgresql.service
+Wants=network-online.target
+OnFailure=tend-v2-canh-bao@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /srv/tend-v2/app/ha-tang/thu-khoi-phuc.sh
+Nice=10

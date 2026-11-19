@@ -106,7 +106,7 @@ systemctl is-active tend-v2 tend
 systemctl list-timers 'tend*'
 ```
 
-Phải thấy `tend-v2-saoluu.timer` (02:30), `tend-v2-tomtat.timer` (18:13) và `tend-v2-goc.timer` (mỗi giờ, phút 41). Chạy thử sao lưu một lần:
+Phải thấy `tend-v2-saoluu.timer` (02:30), `tend-v2-tomtat.timer` (18:13) `tend-v2-goc.timer` (mỗi giờ, phút 41), `tend-v2-kiemtra.timer` (08:07) và `tend-v2-khoiphuc.timer` (ngày 3 hằng tháng). Chạy thử sao lưu một lần:
 
 ```bash
 sudo systemctl start tend-v2-saoluu && tail -3 /var/log/tend-v2-saoluu.log
@@ -142,6 +142,26 @@ sudo systemctl start tend-v2-goc && tail -3 /var/log/tend-v2-goc.log
 Giám sát, kế toán: phiếu viết tay, ảnh chuyển khoản nên gửi bot dạng **Tệp** (📎 › Tệp) để giữ đúng độ nét; gửi dạng
 Ảnh thì Telegram nén bớt. Bot nhận JPG, PNG, WEBP; PDF/HEIC thì chụp màn hình rồi gửi.
 
+## Đề phòng mất dữ liệu: kiểm tra mỗi sáng và thử khôi phục mỗi tháng
+
+| Việc | Khi nào | Báo Telegram |
+|---|---|---|
+| Kiểm tra (`tend-v2-kiemtra.timer`) | 08:07 mỗi sáng | Khi sao lưu quá 30 giờ chưa thành công, chép tài liệu gốc quá 3 giờ chưa thành công, thử khôi phục quá 40 ngày, app không chạy, ổ đĩa dùng ≥ 85%. **Sáng thứ Hai** gửi bản "mọi việc ổn" để biết cảnh báo vẫn sống |
+| Thử khôi phục (`tend-v2-khoiphuc.timer`) | 03:30 ngày 3 hằng tháng | Tải bản sao lưu mới nhất từ Drive, giải mã, khôi phục vào CSDL **tạm**, so số tài khoản/công trình/báo cáo/phiếu/nhật ký với dữ liệu thật, đếm ảnh trong bản sao lưu, rồi xoá CSDL tạm. Đạt: gửi số liệu. Không đạt: cảnh báo đỏ |
+
+Tin gửi về nơi nhận cảnh báo của bản cũ (`/etc/tend/canh-bao.env`, đã cài bằng `cai-canh-bao.sh` của bản cũ), mở
+đầu bằng `app.tend.vn` để phân biệt. Dữ liệu thật không bị đụng: thử khôi phục chỉ đọc CSDL `tendv2` để đếm.
+
+Chạy thử ngay một lần (mất vài phút, cần chỗ trống gấp đôi bản sao lưu):
+
+```bash
+sudo bash /srv/tend-v2/app/ha-tang/thu-khoi-phuc.sh
+```
+
+```bash
+sudo systemctl start tend-v2-kiemtra
+```
+
 ## Các lần sau: nút Triển khai trên GitHub (tuỳ chọn, như bản cũ)
 
 Trên máy tính của anh tạo một cặp khoá mới (không đặt passphrase), khoá **công khai** cài lên máy chủ:
@@ -159,7 +179,7 @@ Không dùng nút thì triển khai tay: `sudo bash /srv/tend-v2/app/ha-tang/tri
 ## Gỡ Tend mới (nếu cần quay lại chỉ dùng bản cũ)
 
 ```bash
-sudo systemctl disable --now tend-v2 tend-v2-saoluu.timer tend-v2-tomtat.timer tend-v2-goc.timer
+sudo systemctl disable --now tend-v2 tend-v2-saoluu.timer tend-v2-tomtat.timer tend-v2-goc.timer tend-v2-kiemtra.timer tend-v2-khoiphuc.timer
 ```
 
 ```bash

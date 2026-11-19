@@ -2,6 +2,7 @@
 Description=Gui Giam doc tom tat thu chi trong ngay qua Telegram (Tend moi)
 After=network-online.target postgresql.service
 Wants=network-online.target
+OnFailure=tend-v2-canh-bao@%n.service
 
 [Service]
 Type=oneshot

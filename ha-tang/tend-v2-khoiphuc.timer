@@ -1,0 +1,9 @@
+[Unit]
+Description=Thu khoi phuc ban sao luu Tend moi ngay 3 hang thang 03:30
+
+[Timer]
+OnCalendar=*-*-03 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

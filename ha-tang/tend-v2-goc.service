@@ -2,7 +2,7 @@
 Description=Kho tai lieu goc Tend moi: xep anh/chung tu theo ngay, chep len Google Drive
 After=network-online.target postgresql.service
 Wants=network-online.target
-OnFailure=tend-canh-bao@%n.service
+OnFailure=tend-v2-canh-bao@%n.service
 
 [Service]
 Type=oneshot
