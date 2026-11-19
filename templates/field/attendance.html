@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% load tend %}{% block title %}Bảng công {{ first|date:"m/Y" }}{% endblock %}
 {% block content %}
 <h1>Bảng công tháng {{ first|date:"m/Y" }}</h1>
-{% if user.sees_payables or user.role == "supervisor" %}<p><a class="btn plain" href="{% url 'field_workers' %}">Danh sách thợ (thêm thợ, đơn giá)</a></p>{% endif %}
+{% if user.sees_payables or user.role == "supervisor" %}<p><a class="btn plain" href="{% url 'field_workers' %}">Nhân sự (mã, nghề, đơn giá)</a></p>{% endif %}
 <p class="muted">Từ báo cáo ngày qua Telegram: giám sát gửi báo cáo là có mặt; thợ chấm theo tên. 8 giờ = 1 công. Sửa công: nhắn bot <b>/suacong</b> kèm lý do.</p>
 <form method="get" class="filters">
   <a class="btn plain" href="?thang={{ prev|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}" aria-label="Tháng trước">‹</a>

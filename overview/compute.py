@@ -13,9 +13,10 @@ from dataclasses import dataclass, field as dc_field
 from datetime import date, timedelta
 from decimal import ROUND_CEILING, Decimal
 
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 from drawings.models import Item
+from field import rates
 from field.models import Attendance, ReportLine, Worker
 from money.models import Entry, Kind
 
@@ -135,18 +136,50 @@ def labor(project, today, user):
 
 
 def labor_cost(project, start=None, end=None):
-    """Chi phí công nhật ước tính = số công × đơn giá, chỉ thợ công nhật (thợ tổ khoán đã nằm trong tiền khoán)."""
-    rows_ = Attendance.objects.filter(project=project, worker__isnull=False, worker__pay=Worker.Pay.DAILY).select_related("worker")
+    """Chi phí công nhật = số công × đơn giá ĐANG ÁP DỤNG ngày đó, chỉ người trả công nhật ngày đó (tổ khoán nằm trong
+    tiền khoán; lương tháng tính ở salary_cost)."""
+    rows_ = Attendance.objects.filter(project=project, worker__isnull=False).select_related("worker")
     if start:
         rows_ = rows_.filter(work_date__gte=start)
     if end:
         rows_ = rows_.filter(work_date__lte=end)
+    rows_ = list(rows_)
+    table = rates.table(r.worker_id for r in rows_)
     cost, missing = ZERO, set()
     for row in rows_:
-        if row.worker.day_rate is None:
+        pay, amount = rates.at(table, row.worker, row.work_date)
+        if pay != Worker.Pay.DAILY:
+            continue
+        if amount is None:
             missing.add(row.worker.name)
         else:
-            cost += row.days * row.worker.day_rate
+            cost += row.days * amount
+    return cost, sorted(missing)
+
+
+def salary_cost(project, start=None, end=None):
+    """Lương tháng (giám sát…) chia vào công trình theo tỷ lệ ngày có mặt trong tháng: lương × công ở đây / tổng công
+    tháng đó ở mọi công trình. Có mặt ghi theo hồ sơ nhân sự hoặc theo tài khoản giám sát gửi báo cáo."""
+    cost, missing = ZERO, set()
+    for person in rates.monthly_profiles():
+        who = Q(worker=person) | (Q(staff_id=person.user_id) if person.user_id else Q(pk__in=[]))
+        rows_ = list(Attendance.objects.filter(who).values_list("project_id", "work_date", "days"))
+        total, here, last = defaultdict(lambda: ZERO), defaultdict(lambda: ZERO), {}
+        for project_id, day, days in rows_:
+            month = (day.year, day.month)
+            total[month] += days
+            if project_id == project.pk and (not start or day >= start) and (not end or day <= end):
+                here[month] += days
+                last[month] = max(last.get(month, day), day)
+        table = rates.table([person.pk])
+        for month, days in here.items():
+            pay, amount = rates.at(table, person, last[month])
+            if pay != Worker.Pay.MONTHLY:
+                continue
+            if amount is None:
+                missing.add(person.name)
+            elif total[month]:
+                cost += (amount * days / total[month]).quantize(Decimal(1))
     return cost, sorted(missing)
 
 
@@ -197,7 +230,10 @@ def profit(project, today, data=None):
     data = data if data is not None else rows(project)
     revenue = contract_value(project, data)
     labor_accrued, missing_rates = labor_cost(project)
+    salary, missing_salary = salary_cost(project)
+    missing_rates = sorted(set(missing_rates) | set(missing_salary))
     parts = {"goods": _sum(project, Kind.SUPPLIER_GOODS), "team": _sum(project, Kind.TEAM_WORK), "labor": labor_accrued,
+             "salary": salary,
              "other": _sum(project, Kind.OTHER_EXPENSE)}
     incurred = sum(parts.values(), ZERO)
     earned = sum((r.value * r.percent_at(today) / HUNDRED for r in data), ZERO)

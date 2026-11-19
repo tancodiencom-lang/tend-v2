@@ -131,3 +131,12 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - Trang Thợ `/tho/`: **+ Thêm thợ** (họ tên, tổ, thợ/phụ; hình thức trả + đơn giá ngày chỉ Giám đốc, kế toán nội bộ; trùng tên bỏ dấu bị chặn; nhật ký kênh web). Lối vào: Bảng công và Tài khoản (trước đây trang Thợ không có link).
 - 111/111 bài kiểm trên SQLite và PostgreSQL 16.
 
+## Nhân sự: mã NS cố định, nghề, đơn giá theo ngày hiệu lực, lương tháng chia theo ngày có mặt (20/11/2026)
+
+- Chủ dự án chốt: "thợ" → **nhân sự được chấm công** (thợ, phụ, giám sát…); mã `NS-0001` cấp một lần, không đổi, không dùng lại; lương tháng giám sát **chia vào chi phí công trình theo tỷ lệ ngày có mặt trong tháng**; danh mục nghề ban đầu Giám sát, Thợ xây, Thợ ốp lát, Thợ sơn bả, Thợ điện nước, Thợ mộc, Thợ thạch cao, Lái xe.
+- `field.Trade` (danh mục nghề, Giám đốc thêm ở trang Nhân sự); `Worker` thêm `code` (tự cấp `services.next_code`, khoá dòng), `trade`, `user` (liên kết tài khoản), bậc Thợ chính/Thợ phụ/Học việc, hình thức trả thêm Lương tháng; `WorkerRate` (đơn giá + hình thức trả theo ngày hiệu lực; giá đầu tiên áp cho cả công trước; `Worker.day_rate/pay` = giá hiện hành). Migration `field.0003` (cấu trúc) + `field.0004` (nghề, mã cho thợ cũ theo thứ tự thêm, giá cũ thành lịch sử từ đầu, hồ sơ cho tài khoản giám sát).
+- Tính tiền: `overview.compute.labor_cost` dùng giá đang áp dụng ngày công (`field/rates.py`); `salary_cost` = lương tháng × công ở công trình / tổng công tháng đó (có mặt theo hồ sơ hoặc theo tài khoản giám sát gửi báo cáo) → `profit.parts["salary"]`, cột "Lương tháng phân bổ" ở Excel lãi lỗ. Bảng công tháng và bot `/cong` cũng tính theo giá đúng ngày.
+- Đường ghi `field/services.py`: `add_worker` (cấp mã), `rename_worker`, `set_rate`, `set_worker` (giá qua `set_rate`), `ensure_profile` (tài khoản giám sát thêm/đổi vai ở trang Tài khoản đăng nhập tự có hồ sơ). Bot khớp theo tên hoặc mã ("NS-0012", "ns12"); nhãn bot "NS-0001 Thắng (thợ phụ, xây)".
+- Trang `/tho/` thành **Nhân sự**: thêm (mã tự cấp), sửa họ tên/nghề/bậc/tổ/hình thức trả/đơn giá + **áp dụng từ ngày**, lịch sử đơn giá, đã nghỉ. Trang Tài khoản › Nhân viên đổi tên **Tài khoản đăng nhập**.
+- 115/115 bài kiểm trên SQLite và PostgreSQL 16; migration chạy trên CSDL diễn tập chép từ bản cũ.
+

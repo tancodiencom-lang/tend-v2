@@ -144,7 +144,8 @@ def _unassigned_photos(link_row):
 
 
 def _label(worker):
-    return f"{worker.name} ({worker.get_kind_display().lower()}{', ' + worker.team if worker.team else ''})"
+    what = worker.trade.name if worker.trade_id else worker.get_kind_display()
+    return (f"{worker.code} " if worker.code else "") + f"{worker.name} ({what.lower()}{', ' + worker.team if worker.team else ''})"
 
 
 def _person(entry, project, work_date, can_add=False):

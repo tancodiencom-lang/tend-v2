@@ -56,33 +56,71 @@ class Photo(models.Model):
         verbose_name_plural = "Ảnh hiện trường"
 
 
+class Trade(models.Model):
+    """Danh mục nghề (Giám đốc quản lý): Giám sát, Thợ xây, Thợ ốp lát…"""
+    name = models.CharField("Nghề", max_length=60, unique=True)
+    order = models.PositiveSmallIntegerField(default=0)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "Nghề"
+        verbose_name_plural = "Nghề"
+        ordering = ["order", "name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Worker(models.Model):
+    """Hồ sơ nhân sự được chấm công (thợ, phụ, giám sát…). Mã NS-0001 cấp một lần, không đổi, không dùng lại."""
+
     class Kind(models.TextChoices):
-        SKILLED = "tho", "Thợ"
-        HELPER = "phu", "Phụ"
+        SKILLED = "tho", "Thợ chính"
+        HELPER = "phu", "Thợ phụ"
+        APPRENTICE = "hoc", "Học việc"
 
     class Pay(models.TextChoices):
         DAILY = "cong_nhat", "Công nhật"
         TEAM = "khoan", "Tổ khoán"
+        MONTHLY = "luong_thang", "Lương tháng"
 
-    name = models.CharField("Tên", max_length=100)
+    code = models.CharField("Mã nhân sự", max_length=12, unique=True, null=True, blank=True, editable=False)
+    name = models.CharField("Họ tên", max_length=100)
+    trade = models.ForeignKey(Trade, verbose_name="Nghề", on_delete=models.PROTECT, null=True, blank=True, related_name="workers")
     team = models.CharField("Tổ", max_length=100, blank=True)
-    kind = models.CharField("Loại", max_length=4, choices=Kind.choices, default=Kind.SKILLED)
+    kind = models.CharField("Bậc", max_length=4, choices=Kind.choices, default=Kind.SKILLED)
     phone = models.CharField("Điện thoại", max_length=20, blank=True)
-    day_rate = models.DecimalField("Đơn giá ngày công (₫)", max_digits=12, decimal_places=0, null=True, blank=True,
-                                   help_text="Chỉ Giám đốc, kế toán xem và sửa.")
-    pay = models.CharField("Hình thức trả", max_length=10, choices=Pay.choices, default=Pay.DAILY,
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, verbose_name="Tài khoản đăng nhập", on_delete=models.PROTECT, null=True,
+                                blank=True, related_name="staff_profile")
+    day_rate = models.DecimalField("Đơn giá hiện hành (₫)", max_digits=12, decimal_places=0, null=True, blank=True,
+                                   help_text="Công nhật: theo ngày; lương tháng: theo tháng. Lịch sử ở WorkerRate.")
+    pay = models.CharField("Hình thức trả", max_length=12, choices=Pay.choices, default=Pay.DAILY,
                            help_text="Tổ khoán: vẫn chấm công để biết số người, tiền nằm ở khoản khoán nên không tính công nhật.")
     active = models.BooleanField("Đang làm", default=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
-        verbose_name = "Thợ"
-        verbose_name_plural = "Thợ"
+        verbose_name = "Nhân sự"
+        verbose_name_plural = "Nhân sự"
         ordering = ["team", "name"]
 
     def __str__(self):
-        return f"{self.name} ({self.get_kind_display().lower()}{', ' + self.team if self.team else ''})"
+        what = self.trade.name if self.trade_id else self.get_kind_display()
+        return f"{self.name} ({what.lower()}{', ' + self.team if self.team else ''})"
+
+
+class WorkerRate(models.Model):
+    """Đơn giá có ngày hiệu lực: công ngày nào tính theo giá đang áp dụng ngày đó (tăng giá không đổi chi phí đã qua)."""
+    worker = models.ForeignKey(Worker, on_delete=models.PROTECT, related_name="rates")
+    start = models.DateField("Áp dụng từ")
+    pay = models.CharField("Hình thức trả", max_length=12, choices=Worker.Pay.choices)
+    amount = models.DecimalField("Đơn giá (₫)", max_digits=12, decimal_places=0, null=True, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["worker", "start"]
+        constraints = [models.UniqueConstraint(fields=["worker", "start"], name="worker_rate_once_per_day")]
 
 
 class Attendance(models.Model):

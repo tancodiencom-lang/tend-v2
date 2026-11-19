@@ -58,7 +58,14 @@ def create(actor, username, first_name, last_name, role, phone, password, projec
     person.set_password(password)
     record_save(person, actor, "Giám đốc thêm tài khoản")
     set_projects(actor, person, projects)
+    _profile(actor, person)
     return person
+
+
+def _profile(actor, person):
+    """Giám sát cần hồ sơ nhân sự (mã NS, lương tháng) để chấm công và chia lương vào công trình."""
+    from field.services import ensure_profile
+    ensure_profile(actor, person)
 
 
 @transaction.atomic
@@ -71,7 +78,9 @@ def update(actor, person, first_name, last_name, role, phone):
         raise ValidationError("Anh không tự đổi vai của mình (sẽ mất quyền quản lý tài khoản).")
     person.first_name, person.last_name = str(first_name or "").strip()[:150], str(last_name or "").strip()[:150]
     person.role, person.phone = role, clean_phone(phone, person)
-    return record_save(person, actor, "Giám đốc sửa tài khoản (tên, vai, số điện thoại)")
+    record_save(person, actor, "Giám đốc sửa tài khoản (tên, vai, số điện thoại)")
+    _profile(actor, person)
+    return person
 
 
 @transaction.atomic

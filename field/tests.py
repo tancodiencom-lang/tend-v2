@@ -133,3 +133,61 @@ class ServiceTests(TestCase):
         services.submit_report(self.site, self.project, {"lines": [{"item_id": self.item.pk, "percent": 50, "reason": "đo lại"}]},
                                client_key=uuid4())
         self.assertEqual(Attendance.objects.filter(staff=self.site).count(), 1)
+
+
+class StaffCodeRateSalaryTests(TestCase):
+    """Nhân sự: mã NS cố định; đơn giá theo ngày hiệu lực; lương tháng chia theo ngày có mặt; bot khớp theo mã."""
+
+    def setUp(self):
+        self.director = User.objects.create_user("gd", password="x-123-abcd-xyz", role=Role.DIRECTOR)
+        self.a = Project.objects.create(code="TN-22", name="A")
+        self.b = Project.objects.create(code="BH-01", name="B")
+
+    def day(self, project, worker, d, days=1, staff=None):
+        Attendance.objects.create(project=project, work_date=d, worker=worker, staff=staff, days=Decimal(days),
+                                  recorded_by=self.director)
+
+    def test_codes_sequential_fixed_and_rename_logged(self):
+        one = services.add_worker(self.director, "Thắng", kind="phu")
+        two = services.add_worker(self.director, "Thuận")
+        self.assertEqual((one.code, two.code), ("NS-0001", "NS-0002"))
+        services.rename_worker(self.director, one, "Nguyễn Văn Thắng")
+        one.refresh_from_db()
+        self.assertEqual((one.name, one.code), ("Nguyễn Văn Thắng", "NS-0001"))
+        self.assertTrue(AuditLog.objects.filter(table="field.Worker", reason__startswith="Đổi họ tên NS-0001").exists())
+        Worker.objects.filter(pk=two.pk).update(active=False)                      # người nghỉ: mã không dùng lại
+        self.assertEqual(services.add_worker(self.director, "Tâm").code, "NS-0003")
+        from .workers import match
+        self.assertEqual(match("ns1")["worker"], one)
+        self.assertEqual(match("NS-0003")["worker"].name, "Tâm")
+
+    def test_rate_change_keeps_past_cost(self):
+        w = services.add_worker(self.director, "Thắng")
+        self.day(self.a, w, date(2026, 10, 10))
+        services.set_rate(self.director, w, 300_000, pay=Worker.Pay.DAILY)     # giá đầu tiên: áp cho cả công trước
+        self.day(self.a, w, date(2026, 11, 10))
+        services.set_rate(self.director, w, 400_000, start=date(2026, 11, 15))
+        self.day(self.a, w, date(2026, 11, 16))
+        cost, missing = labor_cost(self.a)
+        self.assertEqual((cost, missing), (Decimal(1_000_000), []))           # 300k + 300k + 400k
+        w.refresh_from_db()
+        self.assertEqual(w.rates.count(), 2)
+
+    def test_monthly_salary_split_by_days_present(self):
+        from overview.compute import profit, salary_cost
+        sup = User.objects.create_user("gs", password="x-123-abcd-xyz", role=Role.SUPERVISOR)
+        profile = services.ensure_profile(self.director, sup)
+        self.assertEqual((profile.pay, profile.user, profile.code), (Worker.Pay.MONTHLY, sup, "NS-0001"))
+        services.set_rate(self.director, profile, 12_000_000, pay=Worker.Pay.MONTHLY)
+        for d in range(1, 4):                                                   # 3 ngày ở A (theo báo cáo: tài khoản)
+            self.day(self.a, None, date(2026, 11, d), staff=sup)
+        self.day(self.b, None, date(2026, 11, 5), staff=sup)                    # 1 ngày ở B
+        self.assertEqual(salary_cost(self.a)[0], Decimal(9_000_000))
+        self.assertEqual(salary_cost(self.b)[0], Decimal(3_000_000))
+        self.assertEqual(profit(self.a, date(2026, 11, 30))["parts"]["salary"], Decimal(9_000_000))
+        self.assertEqual(labor_cost(self.a)[0], Decimal(0))                    # lương tháng không tính vào công nhật
+
+    def test_supervisor_account_gets_profile(self):
+        from core import accounts
+        person = accounts.create(self.director, "gs.moi", "Nam", "", Role.SUPERVISOR, "", "mat-khau-tam-123")
+        self.assertTrue(Worker.objects.filter(user=person, pay=Worker.Pay.MONTHLY, trade__name="Giám sát").exists())

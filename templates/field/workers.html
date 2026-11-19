@@ -1,27 +1,38 @@
-{% extends "base.html" %}{% load tend %}{% block title %}Thợ{% endblock %}
+{% extends "base.html" %}{% load tend %}{% block title %}Nhân sự{% endblock %}
 {% block content %}
-<h1>Thợ</h1>
+<h1>Nhân sự được chấm công</h1>
 {% for m in messages %}<p class="{% if m.tags == 'error' %}bad{% else %}good{% endif %}">{{ m }}</p>{% endfor %}
-<p class="muted">Bot khớp tên thợ khi chấm công theo danh sách này: tên mới thì bot hỏi thợ hay phụ (hoặc tự thêm khi tin ghi
-"Thắng thợ phụ"), tên gần giống thì hỏi đúng người. {% if can_edit %}Sửa đơn giá, tổ, hình thức trả ở đây hoặc nhắn bot <b>/dongia Hùng 450000 khoán</b>. Thợ tổ khoán vẫn chấm công nhưng không tính tiền công nhật.{% endif %}</p>
-{% if can_add %}<details class="box"{% if not rows %} open{% endif %}><summary><b>+ Thêm thợ</b> <span class="muted">(có sẵn danh sách thì chấm công qua bot khớp tên ngay)</span></summary>
+<p class="muted">Mỗi người một <b>mã NS</b> cố định (không đổi, không dùng lại); họ tên sửa được, có nhật ký. Bot khớp theo tên hoặc mã khi chấm
+công (vd "Công Thắng phụ, NS-0012"). {% if can_edit %}Đơn giá mới áp dụng <b>từ ngày</b> anh/chị chọn — công đã qua giữ giá cũ.
+Lương tháng (giám sát…) chia vào công trình theo tỷ lệ ngày có mặt.{% endif %} Người nghỉ: bỏ tích "Đang làm", không xoá.</p>
+{% if can_add %}<details class="box"{% if not rows %} open{% endif %}><summary><b>+ Thêm nhân sự</b> <span class="muted">(mã tự cấp)</span></summary>
 <form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="add">
-  <label>Tên <input type="text" name="name" required placeholder="vd Thắng"></label>
-  <label>Tổ <input type="text" name="team" placeholder="vd xây"></label>
-  <label>Loại <select name="kind">{% for v, l in kinds %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></label>
-  {% if can_edit %}<label>Hình thức <select name="pay">{% for v, l in pays %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></label>
-  <label>Đơn giá ngày công (₫) <input type="text" inputmode="numeric" name="day_rate" placeholder="để trống nếu chưa có"></label>{% endif %}
+  <label>Họ tên <input type="text" name="name" required placeholder="vd Nguyễn Văn Thắng"></label>
+  <label>Nghề <select name="trade"><option value="">—</option>{% for t in trades %}<option value="{{ t.pk }}">{{ t.name }}</option>{% endfor %}</select></label>
+  <label>Bậc <select name="kind">{% for v, l in kinds %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></label>
+  <label>Tổ <input type="text" name="team" placeholder="vd đội anh Hùng"></label>
+  {% if can_edit %}<label>Hình thức trả <select name="pay">{% for v, l in pays %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></label>
+  <label>Đơn giá (₫/ngày hoặc ₫/tháng) <input type="text" inputmode="numeric" name="day_rate" placeholder="để trống nếu chưa có"></label>{% endif %}
   <button class="btn" type="submit">Thêm</button>
-</form></details>{% endif %}
+</form>
+{% if user.is_director %}<form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="trade">
+  <label>Thêm nghề vào danh mục <input type="text" name="trade_name" placeholder="vd Thợ hàn"></label><button class="btn plain" type="submit">Thêm nghề</button>
+</form>{% endif %}</details>{% endif %}
 <div class="cards">{% for r in rows %}{% with w=r.worker %}
-<section class="card worker{% if not w.active %} off{% endif %}"><header><b>{{ w.name }}</b><span class="muted">{{ r.month|num }} công tháng {{ first|date:"m/Y" }}</span></header>
+<section class="card worker{% if not w.active %} off{% endif %}"><header><b>{{ w.code|default:"(chưa có mã)" }} · {{ w.name }}</b>
+  <span class="muted">{{ w.trade.name|default:"" }}{% if w.user %} · tài khoản {{ w.user.username }}{% endif %} · {{ r.month|num }} công tháng {{ first|date:"m/Y" }}{% if not w.active %} · ▼ đã nghỉ{% endif %}</span></header>
 {% if can_edit %}<form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="id" value="{{ w.pk }}">
+  <label>Họ tên <input type="text" name="name" value="{{ w.name }}"></label>
+  <label>Nghề <select name="trade"><option value="">—</option>{% for t in trades %}<option value="{{ t.pk }}"{% if t.pk == w.trade_id %} selected{% endif %}>{{ t.name }}</option>{% endfor %}</select></label>
+  <label>Bậc <select name="kind">{% for v, l in kinds %}<option value="{{ v }}"{% if v == w.kind %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
   <label>Tổ <input type="text" name="team" value="{{ w.team }}"></label>
-  <label>Loại <select name="kind">{% for v, l in kinds %}<option value="{{ v }}"{% if v == w.kind %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
-  <label>Hình thức <select name="pay">{% for v, l in pays %}<option value="{{ v }}"{% if v == w.pay %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
-  <label>Đơn giá ngày công (₫) <input type="text" inputmode="numeric" name="day_rate" value="{% if w.day_rate is not None %}{{ w.day_rate|num }}{% endif %}" placeholder="chưa có"></label>
+  <label>Hình thức trả <select name="pay">{% for v, l in pays %}<option value="{{ v }}"{% if v == w.pay %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <label>Đơn giá{% if w.pay == "luong_thang" %} tháng{% else %} ngày công{% endif %} (₫) <input type="text" inputmode="numeric" name="day_rate" value="{% if w.day_rate is not None %}{{ w.day_rate|num }}{% endif %}" placeholder="chưa có"></label>
+  <label>Giá mới áp dụng từ <input type="date" name="rate_start" value="{{ today|date:'Y-m-d' }}"></label>
   <label class="check"><input type="checkbox" name="active" value="1"{% if w.active %} checked{% endif %}> Đang làm</label>
   <button class="btn" type="submit">Lưu</button>
-</form>{% else %}<p>{{ w.team|default:"Chưa có tổ" }} · {{ w.get_kind_display }} · {{ w.get_pay_display }}{% if money %} · {{ w.day_rate|vnd|default:"chưa có đơn giá" }}{% endif %}{% if not w.active %} · đã nghỉ{% endif %}</p>{% endif %}
-</section>{% endwith %}{% empty %}<p class="missing">Chưa có thợ. Giám sát chấm công qua bot là có danh sách.</p>{% endfor %}</div>
+</form>
+{% if r.rates %}<p class="muted">Lịch sử đơn giá: {% for x in r.rates %}{{ x.amount|vnd|default:"bỏ giá" }} ({{ x.get_pay_display|lower }}) từ {% if x.start.year == 2000 %}đầu{% else %}{{ x.start|date:"d/m/Y" }}{% endif %}{% if not forloop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+{% else %}<p>{{ w.get_kind_display }} · {{ w.team|default:"Chưa có tổ" }} · {{ w.get_pay_display }}{% if money %} · {{ w.day_rate|vnd|default:"chưa có đơn giá" }}{% endif %}</p>{% endif %}
+</section>{% endwith %}{% empty %}<p class="missing">Chưa có nhân sự. Thêm ở trên, hoặc giám sát chấm công qua bot là có danh sách.</p>{% endfor %}</div>
 {% endblock %}

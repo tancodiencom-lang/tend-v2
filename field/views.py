@@ -20,7 +20,7 @@ from core.text import number
 from projects.models import projects_for
 
 from . import services
-from .models import Attendance, Photo, Worker
+from .models import Attendance, Photo, Trade, Worker
 
 ZERO = Decimal(0)
 
@@ -120,66 +120,95 @@ def _xlsx(request, first, project, data):
 @login_required
 @require_http_methods(["GET", "POST"])
 def workers(request):
+    """Nhân sự được chấm công: mã NS cố định, họ tên, nghề, bậc, tổ, hình thức trả, đơn giá theo ngày hiệu lực."""
     user = request.user
     if not (user.sees_payables or user.role == Role.SUPERVISOR):
         raise PermissionDenied("Trang này dành cho Giám đốc, kế toán và giám sát.")
     can_edit = services.can_set_rates(user)
-    if request.method == "POST" and request.POST.get("action") == "add":
+    action = request.POST.get("action", "save") if request.method == "POST" else ""
+    if action == "add":
         return _add_worker(request, can_edit)
+    if action == "trade":
+        return _add_trade(request)
     if request.method == "POST":
         if not can_edit:
-            raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa đơn giá, hình thức trả.")
+            raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa nhân sự, đơn giá.")
         worker = get_object_or_404(Worker, pk=request.POST.get("id"))
-        raw_rate = request.POST.get("day_rate", "").strip()
-        rate = number(raw_rate) if raw_rate else None
-        if raw_rate and rate is None:
-            messages.error(request, f"{worker.name}: đơn giá không hợp lệ.")
-            return redirect("field_workers")
         try:
-            services.set_worker(user, worker, day_rate=rate, clear_rate=not raw_rate,
-                                pay=request.POST.get("pay") if request.POST.get("pay") in Worker.Pay.values else None,
-                                kind=request.POST.get("kind") if request.POST.get("kind") in Worker.Kind.values else None,
-                                team=request.POST.get("team", worker.team).strip()[:100], active=request.POST.get("active") == "1",
-                                channel="web")
-        except ValidationError as error:
-            messages.error(request, "; ".join(error.messages))
+            with transaction.atomic():
+                if request.POST.get("name") and request.POST["name"].strip() != worker.name:
+                    services.rename_worker(user, worker, request.POST["name"])
+                raw_rate = request.POST.get("day_rate", "").strip()
+                rate = number(raw_rate) if raw_rate else None
+                if raw_rate and rate is None:
+                    raise ValidationError("Đơn giá không hợp lệ.")
+                start = request.POST.get("rate_start") or None
+                pay = request.POST.get("pay") if request.POST.get("pay") in Worker.Pay.values else None
+                rate_changed = (rate != worker.day_rate) or (pay and pay != worker.pay)
+                services.set_worker(user, worker, day_rate=rate if rate_changed and rate is not None else None,
+                                    clear_rate=rate_changed and rate is None and worker.day_rate is not None,
+                                    pay=pay if rate_changed else None,
+                                    rate_start=date.fromisoformat(start) if start else None,
+                                    kind=request.POST.get("kind") if request.POST.get("kind") in Worker.Kind.values else None,
+                                    trade=Trade.objects.filter(pk=request.POST.get("trade") or 0).first(),
+                                    team=request.POST.get("team", worker.team).strip()[:100], active=request.POST.get("active") == "1",
+                                    channel="web")
+        except (ValidationError, ValueError) as error:
+            messages.error(request, f"{worker.code} {worker.name}: " + "; ".join(getattr(error, "messages", [str(error)])))
         else:
-            messages.success(request, f"Đã lưu {worker.name}.")
+            messages.success(request, f"Đã lưu {worker.code} {worker.name}.")
         return redirect("field_workers")
     first = timezone.localdate().replace(day=1)
     month_days = defaultdict(lambda: ZERO)
     for worker_id, days in Attendance.objects.filter(worker__isnull=False, work_date__gte=first,
                                                      project__in=projects_for(user)).values_list("worker_id", "days"):
         month_days[worker_id] += days
-    rows = [{"worker": w, "month": month_days.get(w.pk, ZERO)} for w in Worker.objects.order_by("-active", "team", "name")]
+    people = Worker.objects.select_related("trade", "user").prefetch_related("rates").order_by("-active", "code")
+    rows = [{"worker": w, "month": month_days.get(w.pk, ZERO), "rates": list(w.rates.all())[::-1] if user.sees_payables else []}
+            for w in people]
     return render(request, "field/workers.html", {"rows": rows, "can_edit": can_edit, "money": user.sees_payables, "first": first,
                                                   "pays": Worker.Pay.choices, "kinds": Worker.Kind.choices,
+                                                  "trades": Trade.objects.filter(active=True), "today": timezone.localdate(),
                                                   "can_add": services.can_add_workers(user)})
 
 
+def _add_trade(request):
+    from core.audit import record_save
+    if not request.user.is_director:
+        raise PermissionDenied("Chỉ Giám đốc sửa danh mục nghề.")
+    name = " ".join(request.POST.get("trade_name", "").split())[:60]
+    if not name or Trade.objects.filter(name__iexact=name).exists():
+        messages.error(request, "Nghề trống hoặc đã có.")
+    else:
+        record_save(Trade(name=name, order=Trade.objects.count()), request.user, "Thêm nghề", channel="web")
+        messages.success(request, f"Đã thêm nghề {name}.")
+    return redirect("field_workers")
+
+
 def _add_worker(request, can_edit):
-    """Thêm thợ trước trên web để bot khớp tên khi chấm công (trùng tên bỏ dấu thì hỏi lại, không tạo trùng người)."""
+    """Thêm nhân sự trên web (mã NS tự cấp) để bot khớp tên/mã khi chấm công; trùng tên bỏ dấu thì báo để ghi rõ hơn."""
     from core.text import fold
     user = request.user
     name = " ".join(request.POST.get("name", "").split())
     if name and any(fold(w.name) == fold(name) for w in Worker.objects.filter(active=True)):
-        messages.error(request, f"Đã có thợ tên \"{name}\". Nếu là người khác, ghi thêm họ hoặc tên lót (vd Nguyễn Văn {name}).")
+        messages.error(request, f"Đã có người tên \"{name}\". Nếu là người khác, ghi thêm họ hoặc tên lót (vd Nguyễn Văn {name}).")
         return redirect("field_workers")
     kind = request.POST.get("kind") if request.POST.get("kind") in Worker.Kind.values else Worker.Kind.SKILLED
+    trade = Trade.objects.filter(pk=request.POST.get("trade") or 0).first()
     try:
         with transaction.atomic():
-            worker = services.add_worker(user, name, request.POST.get("team", ""), kind, channel="web")
+            worker = services.add_worker(user, name, request.POST.get("team", ""), kind, channel="web", trade=trade)
             raw_rate = request.POST.get("day_rate", "").strip()
             pay = request.POST.get("pay")
             if can_edit and (raw_rate or pay in Worker.Pay.values):
                 rate = number(raw_rate) if raw_rate else None
                 if raw_rate and rate is None:
                     raise ValidationError("Đơn giá không hợp lệ.")
-                services.set_worker(user, worker, day_rate=rate, pay=pay if pay in Worker.Pay.values else None, channel="web")
+                services.set_rate(user, worker, rate, pay=pay if pay in Worker.Pay.values else None, channel="web")
     except (ValidationError, PermissionDenied) as error:
         messages.error(request, "; ".join(getattr(error, "messages", [str(error)])))
     else:
-        messages.success(request, f"Đã thêm {worker.name}. Chấm công qua bot ghi đúng tên này là khớp.")
+        messages.success(request, f"Đã thêm {worker.code} {worker.name}. Chấm công qua bot ghi tên hoặc mã {worker.code} là khớp.")
     return redirect("field_workers")
 
 
