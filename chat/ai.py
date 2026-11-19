@@ -42,7 +42,13 @@ Việc của bạn:
    nhật; chi_khac chi khác), số phiếu, ngày, đối tượng (tên NCC/tổ/khách/người nhận đúng như trên phiếu), công trình
    (mã), nội dung, số tiền (số nguyên đồng), tiền mặt hay chuyển khoản, photo_index (ảnh số mấy, nếu có ảnh). Chỉ ghi
    số đọc rõ trên ảnh/tin; không đọc được số tiền thì ask_user. Huỷ phiếu đã ghi: propose_void (số phiếu + lý do).
-6. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
+6. CHỈ ĐẠO GIAO VIỆC của Giám đốc (vd "nhắc Nam gửi bản vẽ điện TN-22 trước thứ Sáu", "bảo kế toán đối chiếu công nợ Cát
+   Hùng Vương mai"): gọi find_people lấy đúng người, rồi propose_task: owner_name đúng tên đăng nhập từ find_people, title
+   ngắn gọn bắt đầu bằng động từ, due_date YYYY-MM-DD và due_time HH:MM (không nói giờ thì 17:00; "trước thứ Sáu" là thứ
+   Năm 17:00), project_code nếu có, criteria (thế nào là xong) nếu nói được. Không rõ người hoặc hạn thì ask_user. Người
+   không phải Giám đốc nhờ giao việc: trả lời chỉ Giám đốc giao việc qua trợ lý. Câu hỏi "việc nào đang trễ", "Nam còn
+   việc gì": gọi list_tasks.
+7. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
 Trả lời ngắn, tối đa khoảng 12 dòng. Không dùng Markdown phức tạp."""
 
 _OBJ = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -113,11 +119,24 @@ TOOLS = [
     {"name": "propose_void", "description": "Xin huỷ một phiếu đã ghi (số phiếu hoặc #mã) kèm lý do.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["ref", "reason"],
                       "properties": {"ref": {"type": "string"}, "reason": {"type": "string"}}}},
+    {"name": "find_people", "description": "Nhân viên gần với tên cần tìm (tên, tên đăng nhập, vai, công trình). Chỉ Giám đốc.",
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}},
+    {"name": "list_tasks", "description": "Việc giao đang mở (Giám đốc: mọi người; người khác: việc của mình), có hạn và trạng thái "
+     "trễ/chưa nhận/báo xong.", "input_schema": {"type": "object", "properties": {"name": {"type": "string"}},
+                                                  "additionalProperties": False}},
+    {"name": "propose_task", "description": "Lập phiếu giao việc chờ Giám đốc bấm Xác nhận; trợ lý sẽ giao, nhắc, báo trễ.",
+     "input_schema": {"type": "object", "properties": {
+         "owner_name": {"type": "string", "description": "Tên đăng nhập người nhận (từ find_people)"},
+         "title": {"type": "string"}, "due_date": {"type": "string", "description": "YYYY-MM-DD"},
+         "due_time": {"type": "string", "description": "HH:MM, mặc định 17:00"}, "project_code": {"type": "string"},
+         "criteria": {"type": "string", "description": "Tiêu chí xong"}},
+         "required": ["owner_name", "title", "due_date"], "additionalProperties": False}},
     {"name": "ask_user", "description": "Hỏi lại khi thiếu thông tin hoặc không chắc chi tiết/người nào.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["question"],
                       "properties": {"question": {"type": "string"}}}},
 ]
-FINAL = {'propose_report', 'propose_attendance_fix', 'propose_answer', 'propose_entries', 'propose_void', 'ask_user'}
+FINAL = {'propose_report', 'propose_attendance_fix', 'propose_answer', 'propose_entries', 'propose_void', 'propose_task',
+         'ask_user'}
 
 
 def model():

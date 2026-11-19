@@ -1,0 +1,12 @@
+[Unit]
+Description=Tro ly Giam doc (Tend moi): ban tin sang, nhac viec, nhac bao cao, canh bao, tom tat toi
+After=network-online.target postgresql.service
+Wants=network-online.target
+OnFailure=tend-v2-canh-bao@%n.service
+
+[Service]
+Type=oneshot
+User=tendv2
+Group=tendv2
+WorkingDirectory=/srv/tend-v2/app
+ExecStart=/srv/tend-v2/app/.venv/bin/python manage.py tro_ly

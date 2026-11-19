@@ -32,7 +32,7 @@ from projects.models import Project
 
 from money import services as money
 
-from . import ai, money_bot, parse, reads, telegram
+from . import ai, money_bot, parse, reads, task_bot, telegram
 from .models import ChatLink, ChatPhoto, ChatUpdate, LinkCode, Proposal
 
 CODE_TTL = timedelta(minutes=15)
@@ -49,7 +49,7 @@ HELP = ("Tend qua Telegram:\n"
         "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup\n"
         "• Kế toán: chụp ảnh phiếu hoặc nhắn \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng\" (loại: thu khách, thu khác, "
         "nhận hàng, khoán, trả NCC, trả tổ, trả lương, chi). Tra cứu: /thuchi hôm nay|tuần|tháng, /congno [TN-22], /baocao tuần|tháng, "
-        "/doituong <tên>. Huỷ: /huy PC12 lý do.")
+        "/doituong <tên>. Huỷ: /huy PC12 lý do.\n" + task_bot.HELP)
 
 
 # ---------- kết nối ----------
@@ -229,6 +229,8 @@ def _after_change(link_row, proposal):
 
 
 def summary(proposal):
+    if proposal.kind == Proposal.Kind.TASK:
+        return task_bot.summary(proposal)
     if proposal.kind == Proposal.Kind.MONEY:
         return money_bot.summary(proposal)
     if proposal.kind == Proposal.Kind.VOID:
@@ -535,6 +537,8 @@ def decide(link_row, proposal_id, confirm):
                 result = {"url": "/tho/"}
             elif proposal.kind == Proposal.Kind.MONEY:
                 result = money_bot.confirm(proposal, user)
+            elif proposal.kind == Proposal.Kind.TASK:
+                result = task_bot.confirm(proposal, user)
             elif proposal.kind == Proposal.Kind.VOID:
                 if p.get("needs_director"):
                     raise PermissionDenied("Phiếu này cần Giám đốc duyệt huỷ.")
@@ -547,6 +551,7 @@ def decide(link_row, proposal_id, confirm):
         proposal.state, proposal.error, proposal.decided_at = Proposal.State.FAILED, "; ".join(
             getattr(error, "messages", [str(error)]))[:480], timezone.now()
         record_save(proposal, user, "Xác nhận nhưng Tend không nhận phiếu", channel="telegram")
+        task_bot.friction(user, proposal.error, f"phiếu {proposal.get_kind_display().lower()} không ghi được")
         return "Chưa ghi được: " + proposal.error
     proposal.state, proposal.result, proposal.decided_at = Proposal.State.CONFIRMED, result, timezone.now()
     record_save(proposal, user, "Xác nhận phiếu chat; đã ghi", channel="telegram")
@@ -606,6 +611,8 @@ def handle_text(link_row, text):
     if command == "/yeucau":
         rows = asks.pending_for(user)
         return ("\n\n".join(asks.text(a) for a in rows) or "Không có yêu cầu báo cáo nào đang chờ anh/chị."), None
+    if command in task_bot.COMMANDS:
+        return task_bot.handle(link_row, command, text, lambda **changes: _state(link_row, **changes))
     if command == "/ngatketnoi":
         unlink(link_row, user)
         return "Đã ngắt kết nối Telegram với Tend.", None
@@ -638,6 +645,10 @@ def handle_text(link_row, text):
             return "Cú pháp: /dongia Hùng 450000 (thêm \"khoán\" hoặc \"công nhật\" nếu đổi hình thức trả).", None
         return None, build_rate(link_row, data, text)
     state = link_row.state or {}
+    if state.get("send_back") and not text.startswith("/"):
+        task_id = state["send_back"]
+        _state(link_row, send_back=None)
+        return task_bot.send_back_reason(link_row, task_id, text), None
     if state.get("reason_for") and not text.startswith("/"):
         proposal = add_reason(link_row, state["reason_for"], text)
         if proposal is not None:
@@ -673,6 +684,8 @@ def handle_text(link_row, text):
                 return None, money_bot.build(link_row, data, text)
             if result["tool"] == "propose_void":
                 return _void(link_row, data.get("ref", ""), data.get("reason", ""), text)
+            if result["tool"] == "propose_task":
+                return None, task_bot.build(link_row, data, text)
             return None, build_report(link_row, data, text)
     data = parse.money(text, reads.projects(user))
     if data:
@@ -680,6 +693,7 @@ def handle_text(link_row, text):
     data = parse.report(text, reads.projects(user))
     if data:
         return None, build_report(link_row, data, text)
+    task_bot.friction(user, text, "bot không hiểu tin nhắn")
     return ("Chưa hiểu tin nhắn. Trợ lý AI chưa bật nên bot đọc cú pháp ngắn, ví dụ:\n"
             "\"TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ\" (kèm ảnh).\n/trogiup để xem lệnh."), None
 
@@ -833,6 +847,15 @@ def handle_callback(callback):
         telegram.answer_callback(callback.get("id", ""), text)
         if message.get("message_id"):
             telegram.edit(chat_id, message["message_id"], (message.get("text") or "") + "\n\n" + text)
+        return
+    if kind in ("tn", "ta", "tr"):
+        with transaction.atomic():
+            text = task_bot.callback(link_row, kind, value, lambda **changes: _state(link_row, **changes))
+        telegram.answer_callback(callback.get("id", ""), text[:190])
+        if message.get("message_id") and text.startswith("✓"):
+            telegram.edit(chat_id, message["message_id"], (message.get("text") or "") + "\n\n" + text)
+        elif not text.startswith("✓"):
+            telegram.send(chat_id, text)
         return
     if kind == "ans":
         _state(link_row, answer_to=value)

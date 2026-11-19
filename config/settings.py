@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "asks",
     "overview",
     "chat",
+    "assistant",
 ]
 
 MIDDLEWARE = [
@@ -92,6 +93,8 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if BEHIND_PROXY else None
 
+# Ngày làm việc của trợ lý (thứ Hai = 1 … Chủ nhật = 7): ngoài các ngày này trợ lý không nhắn nhân viên
+TEND_WORK_DAYS = env("TEND_WORK_DAYS", default="1,2,3,4,5,6") or "1,2,3,4,5,6"
 APP_URL = env("APP_URL", default="https://app.tend.vn").rstrip("/")
 TELEGRAM_TOKEN = env("TELEGRAM_TOKEN", default="")
 TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")

@@ -7,6 +7,7 @@ case "$UNIT" in
   tend-v2-goc*) WHAT="CHÉP TÀI LIỆU GỐC lên Google Drive bị lỗi. Ảnh/chứng từ vẫn còn trên máy chủ, giờ sau sẽ thử lại." ;;
   tend-v2-khoiphuc*) WHAT="THỬ KHÔI PHỤC hằng tháng KHÔNG ĐẠT: bản sao lưu có thể không dùng được. Cần kiểm tra ngay." ;;
   tend-v2-tomtat*) WHAT="Gửi tóm tắt thu chi cuối ngày bị lỗi." ;;
+  tend-v2-troly*) WHAT="TRỢ LÝ GIÁM ĐỐC chạy lỗi: bản tin, nhắc việc, cảnh báo lượt này chưa gửi (10 phút sau tự chạy lại)." ;;
   tend-v2.service) WHAT="APP TEND MỚI bị dừng do lỗi (hệ thống tự khởi động lại; báo lại nhiều lần thì cần kiểm tra)." ;;
   *) WHAT="Dịch vụ $UNIT bị lỗi." ;;
 esac

@@ -126,7 +126,34 @@ def execute(user, name, data):
     if name == "pending_asks":
         return [{"ask_id": str(a.pk), "project": a.project.code, "note": a.note, "items": [i.code for i in a.items.all()],
                  "due": a.due.strftime("%d/%m/%Y") if a.due else ""} for a in asks.pending_for(user)]
+    if name == "find_people":
+        return find_people(user, data.get("name", ""))
+    if name == "list_tasks":
+        return list_tasks(user, data.get("name"))
     raise PermissionDenied(f"Công cụ {name} không có.")
+
+
+def find_people(user, name):
+    if not user.is_director:
+        raise PermissionDenied("Chỉ Giám đốc tra nhân viên để giao việc.")
+    from core.models import User
+    key = fold(name)
+    out = []
+    for person in User.objects.filter(is_active=True).prefetch_related("memberships__project"):
+        names = {fold(person.username), fold(person.first_name), fold(person.get_full_name())}
+        if not key or any(key in n or (n and n in key) for n in names):
+            out.append({"username": person.username, "name": str(person), "role": person.get_role_display(),
+                        "projects": [m.project.code for m in person.memberships.all() if m.active]})
+    return out[:15]
+
+
+def list_tasks(user, name=None):
+    from assistant import services as tasks
+    now = timezone.now()
+    rows = tasks.visible(user).filter(state__in=tasks.OPEN_STATES)
+    if name:
+        rows = [t for t in rows if fold(name) in fold(str(t.owner)) or fold(name) == fold(t.owner.username)]
+    return [tasks.task_line(t, now) for t in rows][:30]
 
 
 def overview_text(user):

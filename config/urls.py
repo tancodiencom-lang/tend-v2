@@ -16,6 +16,7 @@ urlpatterns = [
     path("ban-ve/", include("drawings.urls")),
     path("chat/", include("chat.urls")),
     path("yeu-cau/", include("asks.urls")),
+    path("tro-ly/", include("assistant.urls")),
     path("", include("field.urls")),
     path("", include("money.urls")),
     path("tai-khoan/", overview_views.account, name="account"),

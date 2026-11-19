@@ -50,6 +50,7 @@ class Proposal(models.Model):
         ANSWER = "answer", "Trả lời yêu cầu"
         MONEY = "money", "Phiếu thu chi"
         VOID = "void", "Huỷ phiếu"
+        TASK = "task", "Giao việc"
 
     class State(models.TextChoices):
         PENDING = "pending", "Chờ xác nhận"
