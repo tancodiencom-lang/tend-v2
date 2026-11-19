@@ -38,6 +38,7 @@ from .models import ChatLink, ChatPhoto, ChatUpdate, LinkCode, Proposal
 CODE_TTL = timedelta(minutes=15)
 PROPOSAL_TTL = timedelta(hours=24)
 PHOTO_WINDOW = timedelta(minutes=30)
+IMAGE_FILE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CODE_ONLY = re.compile(r"^\s*([A-Za-z]{1,3}[0-9M]\d*(?:\.\d+)+)\s*$")
 HELP = ("Tend qua Telegram:\n"
         "• Báo cáo + chấm công: gửi ảnh rồi nhắn, ví dụ \"TN-22 T2.5 40%, S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; "
@@ -716,7 +717,7 @@ def _save_photo(link_row, sizes, caption=""):
         return False
     code = CODE_ONLY.match(caption or "")
     photo = ChatPhoto(link=link_row, file_unique_id=best.get("file_unique_id", "")[:128], file_id=str(best["file_id"])[:256],
-                      target=f"code:{code.group(1)}" if code else "")
+                      target=f"code:{code.group(1)}" if code else "", caption=(caption or "")[:1000])
     photo.image.save(name, ContentFile(data), save=False)
     photo.save()
     return photo
@@ -749,8 +750,16 @@ def handle_message(message):
         return
     if link_row.chat_id != chat_id:
         ChatLink.objects.filter(pk=link_row.pk).update(chat_id=chat_id)
-    if message.get("photo"):
-        photo = _save_photo(link_row, message["photo"], text)
+    sizes = message.get("photo")
+    document = message.get("document") or {}
+    if not sizes and document:
+        # Ảnh gửi dạng Tệp giữ nguyên độ nét (phiếu viết tay, ảnh chuyển khoản): xử lý như ảnh, lưu đúng tệp gốc
+        if str(document.get("mime_type") or "").lower() not in IMAGE_FILE_TYPES:
+            telegram.send(chat_id, "Tend nhận ảnh JPG, PNG hoặc WEBP. Tệp PDF/HEIC: chụp màn hình hoặc gửi dạng Ảnh.")
+            return
+        sizes = [document]
+    if sizes:
+        photo = _save_photo(link_row, sizes, text)
         if not photo:
             telegram.send(chat_id, "Không nhận được ảnh (quá 15 MB, không phải ảnh, hoặc lỗi mạng). Gửi lại giúp.")
             return

@@ -106,11 +106,41 @@ systemctl is-active tend-v2 tend
 systemctl list-timers 'tend*'
 ```
 
-Phải thấy `tend-v2-saoluu.timer` (02:30) và `tend-v2-tomtat.timer` (18:13). Chạy thử sao lưu một lần:
+Phải thấy `tend-v2-saoluu.timer` (02:30), `tend-v2-tomtat.timer` (18:13) và `tend-v2-goc.timer` (mỗi giờ, phút 41). Chạy thử sao lưu một lần:
 
 ```bash
 sudo systemctl start tend-v2-saoluu && tail -3 /var/log/tend-v2-saoluu.log
 ```
+
+## Kho tài liệu gốc trên Google Drive (đối chiếu)
+
+Mọi ảnh gửi bot (ảnh công trường, phiếu viết tay, ảnh chuyển khoản…) được giữ **nguyên tệp gốc** trên máy chủ. Mỗi giờ
+(phút 41) máy chủ xếp chúng theo loại và ngày rồi chép lên Google Drive công ty — **không mã hoá**, mở Drive là xem được:
+
+| Thư mục trên Drive (`Tend - Tài liệu gốc/`) | Chứa gì | Nên chia sẻ cho |
+|---|---|---|
+| `Hiện trường/<mã công trình>/<tháng>/<ngày>/` | ảnh của báo cáo đã xác nhận, tên tệp có giờ, người gửi, mã chi tiết | giám sát, thiết kế của công trình đó |
+| `Chứng từ thu chi/<tháng>/<ngày>/` | ảnh phiếu chi, hoá đơn, chuyển khoản của phiếu đã ghi (trừ thu khách) | kế toán nội bộ |
+| `Thu tiền khách/<tháng>/<ngày>/` | chứng từ thu tiền khách | kế toán tài chính |
+| `Chưa ghi phiếu/<tháng>/<ngày>/` | ảnh không gắn phiếu, phiếu bị bỏ/hết hạn/lỗi | chỉ Giám đốc |
+
+Mỗi thư mục ngày có `danh-sach.csv` (mở bằng Excel): giờ nhận, người gửi, công trình, số tiền, đối tượng, nội dung tin
+nhắn gốc, tên tệp; có cả phiếu chỉ gửi bằng chữ (tin nhắn chuyển khoản dán vào chat). Ảnh chỉ được chép khi phiếu đã
+chốt (xác nhận/bỏ, hoặc hết hạn sau 24 giờ), nên tên và chỗ tệp không đổi. Drive chỉ được **thêm**, không bị xoá gì.
+
+Dùng kho rclone `gdrive:` mà bản cũ đã cài cho sao lưu; script triển khai tự bật hẹn giờ `tend-v2-goc.timer` nếu thấy
+kho này. Thư mục Drive nằm ở Drive của tài khoản đã cấp quyền cho rclone; anh chia sẻ từng thư mục con theo bảng trên
+(bấm chuột phải › Chia sẻ). Muốn đổi chỗ, thêm dòng `TEND_GOC_DRIVE=<kho>:<thư mục>` vào `/srv/tend-v2/.env`
+(`TEND_GOC_DRIVE=tat` để chỉ giữ trên máy chủ).
+
+Chạy thử ngay, xem kết quả:
+
+```bash
+sudo systemctl start tend-v2-goc && tail -3 /var/log/tend-v2-goc.log
+```
+
+Giám sát, kế toán: phiếu viết tay, ảnh chuyển khoản nên gửi bot dạng **Tệp** (📎 › Tệp) để giữ đúng độ nét; gửi dạng
+Ảnh thì Telegram nén bớt. Bot nhận JPG, PNG, WEBP; PDF/HEIC thì chụp màn hình rồi gửi.
 
 ## Các lần sau: nút Triển khai trên GitHub (tuỳ chọn, như bản cũ)
 
@@ -129,7 +159,7 @@ Không dùng nút thì triển khai tay: `sudo bash /srv/tend-v2/app/ha-tang/tri
 ## Gỡ Tend mới (nếu cần quay lại chỉ dùng bản cũ)
 
 ```bash
-sudo systemctl disable --now tend-v2 tend-v2-saoluu.timer tend-v2-tomtat.timer
+sudo systemctl disable --now tend-v2 tend-v2-saoluu.timer tend-v2-tomtat.timer tend-v2-goc.timer
 ```
 
 ```bash

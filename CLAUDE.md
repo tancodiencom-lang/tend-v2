@@ -78,3 +78,11 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - Cùng droplet với bản cũ, tách hẳn: user `tendv2`, `/srv/tend-v2`, CSDL `tendv2`, dịch vụ `tend-v2` (:8002, 2 tiến trình), Caddy chỉ thêm `/etc/caddy/sites/app.tend.vn.caddy` (Caddyfile bản cũ `import /etc/caddy/sites/*.caddy`). Bot Telegram riêng. Sao lưu 02:30 cùng kho rclone `tendcrypt:tend-v2/`; tóm tắt thu chi 18:13.
 - Cài lần đầu bằng `tend-app/ha-tang/cai-tend-v2.sh` (đã có trên máy chủ qua deploy bản cũ); triển khai `ha-tang/trien-khai.sh`; chép dữ liệu `ha-tang/chep-du-lieu-cu.sh` (sao CSDL cũ thành `tend_ban_sao` rồi `chep_ban_cu`, `--nguoi` nhận Giám đốc bản cũ).
 - Đã diễn tập trên PostgreSQL 16: 74/74 bài kiểm, `check --deploy`, chép từ CSDL bản cũ thật (mã tend-app). Chưa chạy trên máy chủ thật.
+
+## Kho tài liệu gốc trên Google Drive (19/11/2026)
+
+- Chủ dự án yêu cầu lưu tài liệu gốc (ảnh giám sát, phiếu viết tay, ảnh chuyển khoản, ảnh công trường) theo ngày lên Google Drive để đối chiếu. Chọn **Drive**, không Google Photos (Photos không xếp được theo loại/công trình, không chia sẻ theo vai; Drive giữ nguyên tệp, đã có kho rclone `gdrive:`).
+- Mọi ảnh nhận qua bot vẫn lưu `chat.ChatPhoto` (không xoá), nay thêm chú thích kèm ảnh; bot nhận ảnh gửi dạng **Tệp** (JPG/PNG/WEBP, giữ độ nét), từ chối PDF/HEIC có hướng dẫn.
+- `chat/archive.py` + `manage.py xuat_tai_lieu_goc`: ảnh đã chốt (phiếu xác nhận/bỏ/lỗi hoặc quá 25 giờ) → liên kết cứng vào `/srv/tend-v2/tai-lieu-goc/` theo `Hiện trường/<CT>/<tháng>/<ngày>`, `Chứng từ thu chi/…`, `Thu tiền khách/…` (tách để chia sẻ theo vai), `Chưa ghi phiếu/…`; mỗi ngày `danh-sach.csv` (kể cả phiếu thu chi chỉ có chữ). Đặt `archived_as` một lần, không ghi đè/xoá.
+- `ha-tang/dong-bo-goc.sh` (root, `tend-v2-goc.timer` mỗi giờ phút 41): chạy lệnh trên dưới user `tendv2`, rồi `rclone copy` (không xoá) lên `TEND_GOC_DRIVE` (mặc định `gdrive:Tend - Tài liệu gốc`, `tat` = không chép). Không mã hoá: quyền xem do chia sẻ Drive, không do Tend kiểm.
+- 1 migration `chat.0003` (3 cột mới). 77/77 bài kiểm trên SQLite và PostgreSQL 16. Chưa chạy trên máy chủ thật, chưa thử rclone thật.

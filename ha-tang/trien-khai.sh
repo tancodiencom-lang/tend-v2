@@ -16,7 +16,7 @@ echo "== 1. Lay ma moi nhat tu GitHub =="
 as_v2 git -C "$APP" pull -q --ff-only
 as_v2 git -C "$APP" log --oneline -1
 as_v2 ln -sfn "$ROOT/.env" "$APP/.env"
-install -d -m 750 -o tendv2 -g tendv2 "$ROOT/media"
+install -d -m 750 -o tendv2 -g tendv2 "$ROOT/media" "$ROOT/tai-lieu-goc"
 
 echo "== 2. Luu moc CSDL truoc khi doi (giu 5 ban gan nhat) =="
 install -d -m 700 /var/backups/tend-v2
@@ -36,7 +36,7 @@ as_v2 "$PY" "$APP/manage.py" check --deploy --fail-level ERROR
 
 echo "== 5. Dich vu va hen gio =="
 install -m 644 "$APP/ha-tang/tend-v2.service" /etc/systemd/system/tend-v2.service
-for unit in tend-v2-tomtat.service tend-v2-tomtat.timer tend-v2-saoluu.service tend-v2-saoluu.timer; do
+for unit in tend-v2-tomtat.service tend-v2-tomtat.timer tend-v2-saoluu.service tend-v2-saoluu.timer tend-v2-goc.service tend-v2-goc.timer; do
   install -m 644 "$APP/ha-tang/$unit" "/etc/systemd/system/$unit"
 done
 systemctl daemon-reload
@@ -48,6 +48,14 @@ if rclone listremotes 2>/dev/null | grep -q '^tendcrypt:$'; then
   echo "Da bat sao luu hang dem 02:30 (cung kho Drive voi ban cu, thu muc tend-v2/)"
 else
   echo "CANH BAO: chua thay kho rclone 'tendcrypt:' nen CHUA bat sao luu Tend moi"
+fi
+GOC=$(grep -m1 '^TEND_GOC_DRIVE=' "$ROOT/.env" | cut -d= -f2- || true)
+GOC=${GOC:-gdrive:}
+if [ "$GOC" = tat ] || rclone listremotes 2>/dev/null | grep -qx "${GOC%%:*}:"; then
+  systemctl enable -q --now tend-v2-goc.timer
+  echo "Da bat kho tai lieu goc: moi gio xep anh/chung tu theo ngay, chep len Google Drive (thu muc 'Tend - Tài liệu gốc')"
+else
+  echo "CANH BAO: chua thay kho rclone '${GOC%%:*}:' nen CHUA bat chep tai lieu goc len Drive"
 fi
 if grep -q '^TELEGRAM_TOKEN=.' "$ROOT/.env"; then
   as_v2 "$PY" "$APP/manage.py" telegram_webhook || echo "Chua dat duoc webhook Telegram (xem log)"
