@@ -1,0 +1,9 @@
+[Unit]
+Description=Kiem tra Tend moi luc 08:07 moi sang
+
+[Timer]
+OnCalendar=*-*-* 08:07:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

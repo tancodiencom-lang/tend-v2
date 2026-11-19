@@ -1,0 +1,6 @@
+[Unit]
+Description=Gui canh bao Telegram khi %i (Tend moi) bi loi
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /srv/tend-v2/app/ha-tang/canh-bao-dich-vu.sh %i

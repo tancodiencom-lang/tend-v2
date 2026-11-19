@@ -86,3 +86,11 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - `chat/archive.py` + `manage.py xuat_tai_lieu_goc`: ảnh đã chốt (phiếu xác nhận/bỏ/lỗi hoặc quá 25 giờ) → liên kết cứng vào `/srv/tend-v2/tai-lieu-goc/` theo `Hiện trường/<CT>/<tháng>/<ngày>`, `Chứng từ thu chi/…`, `Thu tiền khách/…` (tách để chia sẻ theo vai), `Chưa ghi phiếu/…`; mỗi ngày `danh-sach.csv` (kể cả phiếu thu chi chỉ có chữ). Đặt `archived_as` một lần, không ghi đè/xoá.
 - `ha-tang/dong-bo-goc.sh` (root, `tend-v2-goc.timer` mỗi giờ phút 41): chạy lệnh trên dưới user `tendv2`, rồi `rclone copy` (không xoá) lên `TEND_GOC_DRIVE` (mặc định `gdrive:Tend - Tài liệu gốc`, `tat` = không chép). Không mã hoá: quyền xem do chia sẻ Drive, không do Tend kiểm.
 - 1 migration `chat.0003` (3 cột mới). 77/77 bài kiểm trên SQLite và PostgreSQL 16. Chưa chạy trên máy chủ thật, chưa thử rclone thật.
+
+## Đề phòng mất dữ liệu: kiểm tra sáng, thử khôi phục tháng (19/11/2026)
+
+- `ha-tang/kiem-tra-hang-sang.sh` (`tend-v2-kiemtra.timer` 08:07): báo Telegram khi sao lưu > 30 giờ, chép tài liệu gốc > 3 giờ, thử khôi phục > 40 ngày chưa thành công, app không chạy, đĩa ≥ 85%; thứ Hai gửi bản "mọi việc ổn". Đọc tệp `/var/lib/<việc>/lan-cuoi-thanh-cong`.
+- `ha-tang/thu-khoi-phuc.sh` (`tend-v2-khoiphuc.timer` ngày 3, 03:30): tải bản `hang-ngay` mới nhất, `pg_restore --exit-on-error` vào CSDL tạm `tendv2_thu_khoi_phuc`, so số dòng 8 bảng (không nhiều hơn thật, không rỗng khi thật có), kiểm `.env` và số ảnh trong tar ≥ ảnh trên máy chủ trước giờ sao lưu; luôn xoá CSDL tạm.
+- Cảnh báo riêng của bản mới: `gui-canh-bao.sh` (dùng `/etc/tend/canh-bao.env` của bản cũ), `canh-bao-dich-vu.sh`, `tend-v2-canh-bao@.service`; mọi dịch vụ v2 `OnFailure=tend-v2-canh-bao@`.
+- Diễn tập trên PostgreSQL 16 với rclone giả: sao lưu thật → thử khôi phục đạt; ảnh thiếu trong bản sao lưu và tệp CSDL hỏng đều bị bắt, CSDL tạm luôn xoá; kiểm tra sáng đúng ba tình huống. Chưa chạy trên máy chủ thật.
+

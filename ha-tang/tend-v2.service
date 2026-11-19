@@ -2,7 +2,7 @@
 Description=Tend moi (app.tend.vn) - Django, gunicorn
 After=network.target postgresql.service
 Requires=postgresql.service
-OnFailure=tend-canh-bao@%n.service
+OnFailure=tend-v2-canh-bao@%n.service
 
 [Service]
 User=tendv2

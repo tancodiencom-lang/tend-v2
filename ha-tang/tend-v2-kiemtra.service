@@ -1,0 +1,7 @@
+[Unit]
+Description=Kiem tra moi sang: sao luu, tai lieu goc, thu khoi phuc, app, o dia (Tend moi)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /srv/tend-v2/app/ha-tang/kiem-tra-hang-sang.sh
