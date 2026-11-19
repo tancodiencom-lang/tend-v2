@@ -5,9 +5,9 @@ from decimal import Decimal
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_http_methods
 
 from projects.models import projects_for
 
@@ -43,9 +43,31 @@ def overview_project(request, code):
 
 
 @login_required
-@require_GET
+@require_http_methods(["GET", "POST"])
 def account(request):
-    return render(request, "core/account.html", {})
+    """Tài khoản: tên, vai, ảnh nhân viên (đổi/bỏ ảnh có nhật ký), kết nối Telegram, đăng xuất."""
+    error = ""
+    if request.method == "POST":
+        from core.models import User
+        user = User.objects.get(pk=request.user.pk)
+        from django.core.exceptions import ValidationError
+
+        from core.audit import record_save
+        from core.avatar import normalize
+        try:
+            if request.POST.get("bo_anh"):
+                user.avatar = ""
+                record_save(user, user, "Bỏ ảnh nhân viên")
+            else:
+                upload = request.FILES.get("anh")
+                if upload is None:
+                    raise ValidationError("Chọn ảnh trước khi bấm Lưu ảnh.")
+                user.avatar.save("anh.jpg", normalize(upload.read()), save=False)
+                record_save(user, user, "Đổi ảnh nhân viên")
+            return redirect("account")
+        except ValidationError as exc:
+            error = "; ".join(exc.messages)
+    return render(request, "core/account.html", {"error": error})
 
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

@@ -17,7 +17,10 @@ from projects.models import projects_for
 
 
 def projects(user):
-    return list(projects_for(user).filter(active=True).order_by("code"))
+    rows = projects_for(user).filter(active=True).order_by("code")
+    if getattr(user, "only_project_id", None):          # trả lời trong nhóm của một công trình
+        rows = rows.filter(pk=user.only_project_id)
+    return list(rows)
 
 
 def project(user, code):

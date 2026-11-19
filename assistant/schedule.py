@@ -29,7 +29,7 @@ from money.models import Entry, Kind
 from overview import compute
 from projects.models import Project
 
-from .models import Feedback, Notice, Task
+from .models import Feedback, Notice, Question, Task
 from .services import task_line
 
 PREFIX = "🤖 Trợ lý: "
@@ -38,6 +38,7 @@ LATE_DAYS = 7                  # ngày xong dự kiến trễ hẹn bàn giao t�
 COST_OVERRUN = Decimal("1.10")  # chi phí đã phát sinh vượt giá vốn phần đã làm từ 10%: Gấp
 ESCALATE_AFTER = timedelta(hours=4)
 RATE_GRACE = timedelta(days=2)
+QUESTION_REMIND = timedelta(hours=2)
 
 
 # ---------- giờ giấc ----------
@@ -172,7 +173,10 @@ def morning_text(user, now, found=None):
             for t in waiting]
     if voids:
         out.append(f"• {voids} phiếu thu chi xin huỷ chờ anh duyệt (nút ở tin bot đã gửi).")
-    if not waiting and not voids:
+    questions = list(Question.objects.filter(state=Question.State.OPEN).select_related("asked_by"))
+    out += [f"• Câu hỏi #{q.pk} của {q.asked_by} ({q.where}): {q.text[:150]} (bấm ✍ Tôi trả lời ở tin trợ lý đã gửi)"
+            for q in questions]
+    if not waiting and not voids and not questions:
         out.append("• Không có.")
     found = alerts(today) if found is None else found
     out.append("\n② Cảnh báo")
@@ -334,6 +338,12 @@ def run(now=None):
                 for user in directors():
                     go(f"task:{task.pk}:esc:{user.pk}", user, f"Việc trễ sau khi đã nhắc: {task_line(task, now)}."
                        f"\nĐã nhắc {task.owner} lúc {timezone.localtime(reminded.sent_at):%d/%m %H:%M}, chưa báo xong.")
+
+    for question in Question.objects.filter(state=Question.State.OPEN, created_at__lte=now - QUESTION_REMIND):
+        for user in directors():
+            go(f"q:{question.pk}:nhac:{user.pk}", user, f"Câu hỏi #{question.pk} của {question.asked_by} ({question.where}) "
+               f"đã chờ anh hơn 2 giờ: {question.text[:300]}",
+               [[{"text": "✍ Tôi trả lời", "data": f"qw:{question.pk}"}, {"text": "× Không cần", "data": f"qx:{question.pk}"}]])
 
     if is_workday(local) and time(7, 30) <= local.time() < time(21, 0):
         week = f"{today.isocalendar().year}-{today.isocalendar().week}"

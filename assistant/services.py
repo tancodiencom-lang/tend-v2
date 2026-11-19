@@ -7,7 +7,7 @@ from django.utils import timezone
 from core.audit import record_save
 from projects.models import projects_for
 
-from .models import Feedback, Task
+from .models import Feedback, Question, Task
 
 OPEN_STATES = (Task.State.OPEN, Task.State.REPORTED)
 
@@ -140,3 +140,42 @@ def task_line(task, now):
     else:
         mark = "● đang làm" + ("" if task.accepted_at else ", chưa bấm nhận")
     return f"#{task.pk} {task.title}{where} · {task.owner} · hạn {local:%d/%m %H:%M} · {mark}"
+
+
+# ---------- câu hỏi chờ Giám đốc ----------
+
+@transaction.atomic
+def ask_director(user, text, chat_id, where="", message_id=None, project=None, draft="", channel="telegram"):
+    text = " ".join(str(text or "").split())
+    if not text:
+        raise ValidationError("Ghi câu hỏi, ví dụ: /hoi khách TN-22 muốn đổi gạch lát phòng khách được không?")
+    return record_save(Question(asked_by=user, chat_id=str(chat_id), where=str(where)[:200], message_id=message_id, project=project,
+                                text=text[:2000], draft=" ".join(str(draft or "").split())[:2000]),
+                       user, "Hỏi Giám đốc qua trợ lý", channel=channel)
+
+
+@transaction.atomic
+def answer_question(user, question, text, channel="telegram"):
+    if not user.is_director:
+        raise PermissionDenied("Chỉ Giám đốc trả lời câu hỏi chờ Giám đốc.")
+    question = Question.objects.select_for_update().get(pk=question.pk)
+    if question.state != Question.State.OPEN:
+        raise ValidationError(f"Câu hỏi #{question.pk} đã {question.get_state_display().lower()}.")
+    text = str(text or "").strip()
+    if not text:
+        raise ValidationError("Câu trả lời trống.")
+    question.state, question.answer, question.answered_by, question.answered_at = (
+        Question.State.ANSWERED, text[:3000], user, timezone.now())
+    return record_save(question, user, "Giám đốc trả lời câu hỏi", channel=channel)
+
+
+@transaction.atomic
+def drop_question(user, question, channel="telegram"):
+    if not user.is_director:
+        raise PermissionDenied("Chỉ Giám đốc đóng câu hỏi.")
+    question = Question.objects.select_for_update().get(pk=question.pk)
+    if question.state != Question.State.OPEN:
+        raise ValidationError(f"Câu hỏi #{question.pk} đã {question.get_state_display().lower()}.")
+    question.state, question.answered_by, question.answered_at = Question.State.DROPPED, user, timezone.now()
+    return record_save(question, user, "Giám đốc: không cần trả lời", channel=channel)
+

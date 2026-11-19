@@ -142,8 +142,10 @@ class OverviewPageTests(Fixture, TestCase):
 
     def test_tabs_by_role(self):
         tabs = lambda user: [t["label"] for t in self.page(user).context["tabs"]]
-        self.assertEqual(tabs(self.site), ["Tổng quan", "Bản vẽ", "Báo cáo", "Trợ lý", "Tài khoản"])
-        self.assertEqual(tabs(self.users[Role.INTERNAL_ACCOUNTANT]), ["Tổng quan", "Công", "Báo cáo", "Trợ lý", "Tài khoản"])
+        name = lambda user: user.first_name or user.get_full_name() or user.username    # mục cuối: tên người đang đăng nhập
+        self.assertEqual(tabs(self.site), ["Tổng quan", "Bản vẽ", "Báo cáo", "Trợ lý", name(self.site)])
+        accountant = self.users[Role.INTERNAL_ACCOUNTANT]
+        self.assertEqual(tabs(accountant), ["Tổng quan", "Công", "Báo cáo", "Trợ lý", name(accountant)])
 
 
 class AuditTests(Fixture, TestCase):

@@ -32,8 +32,8 @@ from projects.models import Project
 
 from money import services as money
 
-from . import ai, money_bot, parse, reads, task_bot, telegram
-from .models import ChatLink, ChatPhoto, ChatUpdate, LinkCode, Proposal
+from . import ai, group_bot, money_bot, parse, reads, task_bot, telegram
+from .models import ChatLink, ChatPhoto, ChatUpdate, GroupViewer, LinkCode, Proposal
 
 CODE_TTL = timedelta(minutes=15)
 PROPOSAL_TTL = timedelta(hours=24)
@@ -589,8 +589,9 @@ def _remember(link_row, text, answer):
     _state(link_row, history=history)
 
 
-def handle_text(link_row, text):
-    """Trả (chữ trả lời, phiếu hoặc None)."""
+def handle_text(link_row, text, group=None, passive=False, message_id=None):
+    """Trả (chữ trả lời, phiếu hoặc None). `group`: tin trong nhóm (trả lời không có tiền, phiếu gửi riêng);
+    `passive`: tin trong nhóm không gọi trợ lý — chỉ lập phiếu khi rõ là báo cáo/phiếu, còn lại im lặng."""
     user = link_row.user
     command = text.split()[0].casefold() if text.split() else ""
     if command in ("/trogiup", "/help", "/start"):
@@ -645,37 +646,68 @@ def handle_text(link_row, text):
             return "Cú pháp: /dongia Hùng 450000 (thêm \"khoán\" hoặc \"công nhật\" nếu đổi hình thức trả).", None
         return None, build_rate(link_row, data, text)
     state = link_row.state or {}
-    if state.get("send_back") and not text.startswith("/"):
-        task_id = state["send_back"]
-        _state(link_row, send_back=None)
-        return task_bot.send_back_reason(link_row, task_id, text), None
-    if state.get("reason_for") and not text.startswith("/"):
-        proposal = add_reason(link_row, state["reason_for"], text)
-        if proposal is not None:
-            return None, proposal
-    if state.get("answer_to") and not text.startswith("/"):
-        ask_id = state["answer_to"]
-        _state(link_row, answer_to=None)
-        return None, build_answer(link_row, ask_id, text, text)
+    if group is None and not text.startswith("/"):        # các bước đang chờ chỉ nhận ở tin riêng
+        if state.get("answer_question"):
+            question_id = state["answer_question"]
+            _state(link_row, answer_question=None)
+            return task_bot.answer_text(link_row, question_id, text), None
+        if state.get("send_back"):
+            task_id = state["send_back"]
+            _state(link_row, send_back=None)
+            return task_bot.send_back_reason(link_row, task_id, text), None
+        if state.get("reason_for"):
+            proposal = add_reason(link_row, state["reason_for"], text)
+            if proposal is not None:
+                return None, proposal
+        if state.get("answer_to"):
+            ask_id = state["answer_to"]
+            _state(link_row, answer_to=None)
+            return None, build_answer(link_row, ask_id, text, text)
+    where = f"nhóm \"{group.title}\"" if group else "tin nhắn riêng"
+    reply_chat = group.chat_id if group else link_row.chat_id
+    project = group.project if group else None
+
+    def escalate(question, draft=""):
+        if user.is_director:
+            return "Câu này cần anh quyết; trợ lý không có số liệu để trả lời thay."
+        task_bot.escalate(user, question, reply_chat, where, message_id, project, draft)
+        return "Dạ em ghi nhận, em hỏi Giám đốc và trả lời lại ở đây."
+
     if ai.available():
         photos = _unassigned_photos(link_row)
         images = []
-        if money.kinds_for(user):     # kế toán, Giám đốc: AI xem ảnh để đọc phiếu thu/chi
+        if group is None and money.kinds_for(user):     # kế toán, Giám đốc: AI xem ảnh để đọc phiếu thu/chi (chỉ tin riêng)
             for photo in photos[:4]:
                 images.append(photo.image.read())
                 photo.image.close()
-        result = ai.run(text, list(state.get("history") or []),
-                        f"Hôm nay {timezone.localdate():%d/%m/%Y}. Người dùng: {user} (vai {user.get_role_display()}). "
-                        f"Ảnh vừa gửi chưa gắn phiếu: {len(photos)}" + (f" (ảnh số 0–{len(images) - 1} đính kèm)." if images else "."),
-                        lambda name, data: reads.execute(user, name, data), images=images)
+        context = (f"Hôm nay {timezone.localdate():%d/%m/%Y}. Người dùng: {user} (vai {user.get_role_display()}). "
+                   f"Ảnh vừa gửi chưa gắn phiếu: {len(photos)}" + (f" (ảnh số 0–{len(images) - 1} đính kèm)." if images else "."))
+        viewer = user
+        if group is not None:
+            viewer = GroupViewer.of(user, group.project)
+            context += (f"\nĐANG Ở NHÓM Telegram \"{group.title}\"" + (f" của công trình {group.project.code}" if group.project_id else "")
+                        + ". Cả nhóm đọc câu trả lời: KHÔNG nêu số tiền, giá, công nợ, lãi; hỏi về tiền thì trả lời \"Phần tiền "
+                          "anh/chị hỏi riêng em nhé\". Phiếu báo cáo sẽ gửi riêng người nhắn xác nhận."
+                        + (" Tin này KHÔNG gọi trợ lý: chỉ lập phiếu nếu rõ ràng là báo cáo/chấm công; còn lại trả lời rỗng." if passive else ""))
+        history = [] if group is not None else list(state.get("history") or [])
+        result = ai.run(text, history, context, lambda name, data: reads.execute(viewer, name, data), images=images,
+                        tools=ai.group_tools() if group is not None else None)
         if result is not None:
             if result["type"] == "text":
-                _remember(link_row, text, result["text"])
+                if passive:
+                    return None, None
+                if group is None:
+                    _remember(link_row, text, result["text"])
                 return result["text"], None
             data = result["input"]
             if result["tool"] == "ask_user":
-                _remember(link_row, text, data.get("question", ""))
+                if passive:
+                    return None, None
+                if group is None:
+                    _remember(link_row, text, data.get("question", ""))
                 return data.get("question") or "Anh/chị nói rõ hơn giúp.", None
+            if result["tool"] == "ask_director":
+                return (None, None) if passive else (escalate(data.get("question") or text, data.get("draft", "")), None)
             if result["tool"] == "propose_attendance_fix":
                 return None, build_fix(link_row, data, text)
             if result["tool"] == "propose_answer":
@@ -693,9 +725,14 @@ def handle_text(link_row, text):
     data = parse.report(text, reads.projects(user))
     if data:
         return None, build_report(link_row, data, text)
+    if passive:
+        return None, None
+    if group is not None:
+        return escalate(text), None
     task_bot.friction(user, text, "bot không hiểu tin nhắn")
     return ("Chưa hiểu tin nhắn. Trợ lý AI chưa bật nên bot đọc cú pháp ngắn, ví dụ:\n"
-            "\"TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ\" (kèm ảnh).\n/trogiup để xem lệnh."), None
+            "\"TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ\" (kèm ảnh).\n"
+            "/trogiup để xem lệnh; /hoi <câu hỏi> để hỏi Giám đốc."), None
 
 
 def _void(link_row, ref, reason, text):
@@ -745,7 +782,12 @@ def handle_message(message):
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id") or "")
     external_id, display_name = _sender(message)
-    if not chat_id or not external_id or chat.get("type") != "private":
+    if not chat_id or not external_id:
+        return
+    if chat.get("type") in ("group", "supergroup"):
+        group_bot.handle(message)
+        return
+    if chat.get("type") != "private":
         return
     text = (message.get("text") or message.get("caption") or "").strip()
     found = re.fullmatch(r"/(?:start|ketnoi)\s+(\d{8})", text)
@@ -848,9 +890,10 @@ def handle_callback(callback):
         if message.get("message_id"):
             telegram.edit(chat_id, message["message_id"], (message.get("text") or "") + "\n\n" + text)
         return
-    if kind in ("tn", "ta", "tr"):
+    if kind in ("tn", "ta", "tr", "qa", "qw", "qx"):
+        handler = task_bot.callback if kind[0] == "t" else task_bot.question_callback
         with transaction.atomic():
-            text = task_bot.callback(link_row, kind, value, lambda **changes: _state(link_row, **changes))
+            text = handler(link_row, kind, value, lambda **changes: _state(link_row, **changes))
         telegram.answer_callback(callback.get("id", ""), text[:190])
         if message.get("message_id") and text.startswith("✓"):
             telegram.edit(chat_id, message["message_id"], (message.get("text") or "") + "\n\n" + text)
@@ -883,7 +926,9 @@ def handle_update(update):
             ChatUpdate.objects.create(update_id=int(update["update_id"]))
     except (IntegrityError, KeyError, TypeError, ValueError):
         return
-    if update.get("callback_query"):
+    if update.get("my_chat_member"):
+        group_bot.on_member(update["my_chat_member"])
+    elif update.get("callback_query"):
         handle_callback(update["callback_query"])
     elif update.get("message"):
         handle_message(update["message"])

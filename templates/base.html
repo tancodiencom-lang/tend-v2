@@ -8,6 +8,6 @@
 </head>
 <body>
   <main class="page">{% block content %}{% endblock %}</main>
-  {% if tabs %}<nav class="tabs" aria-label="Mục chính">{% for t in tabs %}<a href="{{ t.url }}"{% if t.active %} aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor %}</nav>{% endif %}
+  {% if tabs %}<nav class="tabs" aria-label="Mục chính">{% for t in tabs %}<a href="{{ t.url }}"{% if t.active %} aria-current="page"{% endif %}{% if t.person %} class="person" title="{{ t.title }}"{% endif %}>{% if t.person %}{% if t.avatar %}<img class="avatar" src="{{ t.avatar }}" alt="">{% else %}<span class="avatar" aria-hidden="true">{{ t.initials }}</span>{% endif %}<span>{{ t.label }}</span>{% else %}{{ t.label }}{% endif %}</a>{% endfor %}</nav>{% endif %}
 </body>
 </html>

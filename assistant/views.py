@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from . import services
-from .models import Feedback, Task
+from .models import Feedback, Question, Task
 
 
 @login_required
@@ -23,5 +23,6 @@ def index(request):
         "closed": [{"task": t, "line": services.task_line(t, now)} for t in closed],
         "late_count": sum(1 for t in open_ if t.state == Task.State.OPEN and now > t.due),
         "feedback": list(Feedback.objects.select_related("author")[:50]) if user.is_director else [],
+        "questions": list(Question.objects.select_related("asked_by", "answered_by")[:30]) if user.is_director else [],
     }
     return render(request, "assistant/index.html", context)

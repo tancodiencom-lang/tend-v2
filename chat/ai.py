@@ -48,7 +48,10 @@ Việc của bạn:
    Năm 17:00), project_code nếu có, criteria (thế nào là xong) nếu nói được. Không rõ người hoặc hạn thì ask_user. Người
    không phải Giám đốc nhờ giao việc: trả lời chỉ Giám đốc giao việc qua trợ lý. Câu hỏi "việc nào đang trễ", "Nam còn
    việc gì": gọi list_tasks.
-7. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
+7. Câu hỏi KHÔNG trả lời được bằng công cụ (cần quyết định, cam kết, giá, thay đổi thiết kế, thông tin không có trong Tend)
+   của người không phải Giám đốc: gọi ask_director với câu hỏi viết rõ (ai hỏi, về việc gì) và bản nháp trả lời nếu có
+   căn cứ. Không tự hứa, không đoán.
+8. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
 Trả lời ngắn, tối đa khoảng 12 dòng. Không dùng Markdown phức tạp."""
 
 _OBJ = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -131,12 +134,18 @@ TOOLS = [
          "due_time": {"type": "string", "description": "HH:MM, mặc định 17:00"}, "project_code": {"type": "string"},
          "criteria": {"type": "string", "description": "Tiêu chí xong"}},
          "required": ["owner_name", "title", "due_date"], "additionalProperties": False}},
+    {"name": "ask_director", "description": "Chuyển câu hỏi khó cho Giám đốc; trợ lý sẽ trả lời lại đúng chỗ khi Giám đốc trả lời.",
+     "input_schema": {"type": "object", "properties": {"question": {"type": "string"}, "draft": {"type": "string",
+                      "description": "Bản nháp trả lời để Giám đốc duyệt nhanh (để trống nếu không có căn cứ)"}},
+                      "required": ["question"], "additionalProperties": False}},
     {"name": "ask_user", "description": "Hỏi lại khi thiếu thông tin hoặc không chắc chi tiết/người nào.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["question"],
                       "properties": {"question": {"type": "string"}}}},
 ]
 FINAL = {'propose_report', 'propose_attendance_fix', 'propose_answer', 'propose_entries', 'propose_void', 'propose_task',
-         'ask_user'}
+         'ask_director', 'ask_user'}
+# Trong nhóm: không có công cụ tiền (cả nhóm cùng đọc câu trả lời; phiếu thu chi nhập ở tin riêng)
+GROUP_EXCLUDED = {'money_summary', 'list_entries', 'find_parties', 'propose_entries', 'propose_void'}
 
 
 def model():
@@ -199,7 +208,11 @@ def image_blocks(images):
     return blocks
 
 
-def run(text, history, context, execute, images=()):
+def group_tools():
+    return [tool for tool in TOOLS if tool['name'] not in GROUP_EXCLUDED]
+
+
+def run(text, history, context, execute, images=(), tools=None):
     """Chạy vòng công cụ. `execute(name, input)` do bot cung cấp, chạy dưới quyền người dùng.
     `images`: ảnh vừa gửi (bytes) theo thứ tự — ảnh số 0, 1, … — để AI đọc phiếu thu/chi.
 
@@ -213,7 +226,7 @@ def run(text, history, context, execute, images=()):
     for _ in range(MAX_STEPS):
         try:
             response = create_message(model=model(), max_tokens=2000, system=[{'type': 'text', 'text': SYSTEM,
-                                      'cache_control': {'type': 'ephemeral'}}], tools=TOOLS, messages=messages,
+                                      'cache_control': {'type': 'ephemeral'}}], tools=tools or TOOLS, messages=messages,
                                       output_config={'effort': 'low'})
         except Exception as error:   # mạng/hết hạn mức/khoá sai: bot báo và dùng lệnh không AI
             log.warning('Gọi AI lỗi (%s)', type(error).__name__)
