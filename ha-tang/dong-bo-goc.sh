@@ -25,10 +25,20 @@ if [ "$REMOTE" = "tat" ]; then
   log "TEND_GOC_DRIVE=tat: chi xep tep tren may chu, khong chep len Drive"
   exit 0
 fi
-if ! rclone listremotes 2>/dev/null | grep -qx "${REMOTE%%:*}:"; then
-  log "LOI: chua co kho rclone '${REMOTE%%:*}:' (xem ha-tang/KE-HOACH-SAO-LUU.md cua ban cu)"
+# Thu toi 3 lan, cach 30 giay: luc rclone (hoac sao luu ban cu) dang ghi lai tep cau hinh de lam moi quyen Google,
+# doc tep co the hut kho 'gdrive:' hoac chep loi tam thoi. Chi bao loi khi ca 3 lan deu hong.
+ok=""
+for attempt in 1 2 3; do
+  if rclone listremotes 2>/dev/null | grep -qx "${REMOTE%%:*}:" \
+     && rclone copy "$DIR" "$REMOTE" --exclude '*.tam' --quiet; then
+    ok=1
+    break
+  fi
+  [ "$attempt" -lt 3 ] && sleep 30
+done
+if [ -z "$ok" ]; then
+  log "LOI: 3 lan chua chep duoc len $REMOTE (kho rclone '${REMOTE%%:*}:' khong doc duoc hoac mang loi). Anh/chung tu van tren may chu, gio sau thu lai."
   exit 1
 fi
-rclone copy "$DIR" "$REMOTE" --exclude '*.tam' --quiet
 date '+%d/%m/%Y %H:%M' > "$STATE/lan-cuoi-thanh-cong"
 log "Da chep kho tai lieu goc len $REMOTE"
