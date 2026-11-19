@@ -3,7 +3,7 @@
 Phiếu chỉ ghi khi người nhập bấm ✓ Xác nhận, qua `money.services.add_entries` (một giao dịch, nhật ký, chống gửi trùng).
 Nút Xác nhận chỉ hiện khi mọi dòng đã rõ đối tượng, có công trình (loại cần), và nghi trùng thì đã bấm "Vẫn ghi".
 """
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -125,6 +125,9 @@ def summary(proposal):
                  r["project_code"] or ("? chưa chọn công trình" if r["kind"] in NEEDS_PROJECT else "chung công ty"),
                  METHOD.get(r["method"], r["method"]), vnd(r["amount"]), "có ảnh chứng từ" if r["photo_id"] else "không ảnh"]
         out.append(f"{i}. " + " · ".join(parts) + (f"\n   {r['content']}" if r["content"] else ""))
+        old = money.backfill_days(date.fromisoformat(r["date"]))
+        if old:
+            out.append(f"   ⚠ Nhập bù: phiếu cũ {old} ngày. Kiểm tra kỳ này trên MISA đã khoá sổ chưa trước khi xuất MISA.")
         if r.get("duplicate"):
             out.append(f"   ⚠ Nghi trùng: {r['duplicate']}" + (" — đã chọn vẫn ghi" if r.get("allow_duplicate") else ""))
     if proposal.payload.get("extra_photos"):

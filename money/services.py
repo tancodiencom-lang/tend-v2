@@ -21,7 +21,8 @@ from projects.models import Project, projects_for
 
 from .models import NEEDS_PROJECT, RECEIPTS, Entry, Kind, Party
 
-MAX_DAYS_BACK = 62
+RECENT_DAYS = 62          # cũ hơn: vẫn nhập được (nhập bù) nhưng phiếu hiện cảnh báo để kiểm kỳ MISA đã khoá sổ chưa
+MAX_DAYS_BACK = 730       # hơn 2 năm: gần như chắc gõ nhầm năm
 INTERNAL_KINDS = set(Kind.values) - {Kind.CUSTOMER_RECEIPT}
 
 
@@ -57,8 +58,14 @@ def check_date(value):
     if day > today:
         raise ValidationError("Ngày phiếu không được sau hôm nay.")
     if (today - day).days > MAX_DAYS_BACK:
-        raise ValidationError(f"Chỉ nhập phiếu trong {MAX_DAYS_BACK} ngày gần nhất; phiếu cũ hơn nhập trên MISA.")
+        raise ValidationError(f"Ngày phiếu {day:%d/%m/%Y} cách hôm nay hơn 2 năm — kiểm tra lại năm. Phiếu cũ hơn nữa nhập trên MISA.")
     return day
+
+
+def backfill_days(day):
+    """Số ngày phiếu cũ hơn mốc nhập thường (62 ngày); 0 nếu là phiếu gần đây."""
+    age = (timezone.localdate() - day).days
+    return age if age > RECENT_DAYS else 0
 
 
 def same_group(kind):
