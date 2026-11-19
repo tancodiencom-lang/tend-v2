@@ -29,7 +29,8 @@ Việc của bạn:
    đúng mã chi tiết, rồi gọi propose_report. Chỉ dùng mã có trong kết quả find_details; không chắc thì ask_user.
    Chấm công: liệt kê từng người được nêu tên trong people (tên đúng như người dùng viết; "nửa ngày" → days 0.5;
    "4 tiếng/4h/4 giờ" → hours 4; không nói gì → cả ngày). Người báo cáo (giám sát) tự có công, không đưa vào people.
-   Nếu người dùng nói tổ của người đó thì ghi team. Không tự bịa tên, không gộp người.
+   Nếu người dùng nói tổ của người đó thì ghi team; nói "thợ phụ"/"phụ" hay "thợ chính"/"thợ" thì ghi kind (phu/tho), không
+   đưa chữ đó vào tên. Không tự bịa tên, không gộp người.
 2. Sửa chấm công đã gửi ("sửa công Hùng hôm qua thành nửa ngày vì về sớm"): gọi propose_attendance_fix, phải có lý do;
    thiếu lý do thì ask_user.
 3. Trả lời một YÊU CẦU BÁO CÁO không phải về tiến độ (xem pending_asks): gọi propose_answer.
@@ -88,7 +89,9 @@ TOOLS = [
                                                    "reason": {"type": "string"}}}},
                           "people": {"type": "array", "items": {"type": "object", "additionalProperties": False, "required": ["name"],
                                      "properties": {"name": {"type": "string"}, "days": {"type": "number"},
-                                                    "hours": {"type": "number"}, "team": {"type": "string"}}}},
+                                                    "hours": {"type": "number"}, "team": {"type": "string"},
+                                                    "kind": {"type": "string", "enum": ["tho", "phu"],
+                                                             "description": "Chỉ khi người dùng nói rõ: thợ chính/thợ → tho; thợ phụ/phụ → phu"}}}},
                           "note": {"type": "string"}}}},
     {"name": "propose_attendance_fix", "description": "Lập phiếu sửa chấm công một người (đặt lại số công; 0 là bỏ công).",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["project_code", "work_date", "name", "reason"],

@@ -125,3 +125,9 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - Trang Trợ lý: thêm cột **Người giao** (và lúc giao); thao tác trên web như bot (`assistant.views.act`, `/tro-ly/viec/<id>/<nhan|xong|nhan-ket-qua|tra-lai|huy>/`, kênh `web`): người làm Nhận việc / Báo xong (ghi chú); Giám đốc Nhận kết quả / Trả lại (lý do) / Huỷ (lý do); báo Telegram như khi bấm trên bot (`task_bot.notify_done`, `task_bot.tell`). Giao việc mới vẫn qua bot (phiếu xác nhận).
 - 107/107 bài kiểm trên SQLite và PostgreSQL 16.
 
+## Chấm công đọc đúng tin thật; danh sách thợ nhập trước (20/11/2026)
+
+- Giám đốc nhắn "Báo cáo + chấm công hôm nay tn-22 t2.1 58% Công Thắng thợ phụ, Thuận thợ chính" → phiếu chỉ có tiến độ, mất 2 thợ mà không báo (cú pháp ngắn bắt buộc "Công:"). Sửa `chat/parse.py`: phần chấm công bắt đầu ở "công/chấm công/công nhân" (có hoặc không dấu hai chấm; không nhầm "công trình/việc/tác/ty/nhật") đứng SAU dòng báo cáo cuối; bỏ "hôm nay" và mã công trình khỏi tên; chữ "thợ phụ/phụ/thợ chính/thợ" cuối tên → `kind` (tên một chữ như "Phú" giữ nguyên). Tên mới có `kind` + người gửi được thêm thợ → phiếu lập sẵn "thêm thợ mới" (không hỏi); tên gần giống người có sẵn vẫn hỏi. Còn chữ sau dòng cuối mà không đọc ra người → phiếu hiện "⚠ Bot CHƯA ĐỌC được phần …". AI `propose_report.people[].kind`. Nhãn người gửi theo vai ("giám đốc, có mặt").
+- Trang Thợ `/tho/`: **+ Thêm thợ** (họ tên, tổ, thợ/phụ; hình thức trả + đơn giá ngày chỉ Giám đốc, kế toán nội bộ; trùng tên bỏ dấu bị chặn; nhật ký kênh web). Lối vào: Bảng công và Tài khoản (trước đây trang Thợ không có link).
+- 111/111 bài kiểm trên SQLite và PostgreSQL 16.
+

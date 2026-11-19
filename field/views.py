@@ -9,6 +9,7 @@ from io import BytesIO
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -123,6 +124,8 @@ def workers(request):
     if not (user.sees_payables or user.role == Role.SUPERVISOR):
         raise PermissionDenied("Trang này dành cho Giám đốc, kế toán và giám sát.")
     can_edit = services.can_set_rates(user)
+    if request.method == "POST" and request.POST.get("action") == "add":
+        return _add_worker(request, can_edit)
     if request.method == "POST":
         if not can_edit:
             raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa đơn giá, hình thức trả.")
@@ -150,7 +153,34 @@ def workers(request):
         month_days[worker_id] += days
     rows = [{"worker": w, "month": month_days.get(w.pk, ZERO)} for w in Worker.objects.order_by("-active", "team", "name")]
     return render(request, "field/workers.html", {"rows": rows, "can_edit": can_edit, "money": user.sees_payables, "first": first,
-                                                  "pays": Worker.Pay.choices, "kinds": Worker.Kind.choices})
+                                                  "pays": Worker.Pay.choices, "kinds": Worker.Kind.choices,
+                                                  "can_add": services.can_add_workers(user)})
+
+
+def _add_worker(request, can_edit):
+    """Thêm thợ trước trên web để bot khớp tên khi chấm công (trùng tên bỏ dấu thì hỏi lại, không tạo trùng người)."""
+    from core.text import fold
+    user = request.user
+    name = " ".join(request.POST.get("name", "").split())
+    if name and any(fold(w.name) == fold(name) for w in Worker.objects.filter(active=True)):
+        messages.error(request, f"Đã có thợ tên \"{name}\". Nếu là người khác, ghi thêm họ hoặc tên lót (vd Nguyễn Văn {name}).")
+        return redirect("field_workers")
+    kind = request.POST.get("kind") if request.POST.get("kind") in Worker.Kind.values else Worker.Kind.SKILLED
+    try:
+        with transaction.atomic():
+            worker = services.add_worker(user, name, request.POST.get("team", ""), kind, channel="web")
+            raw_rate = request.POST.get("day_rate", "").strip()
+            pay = request.POST.get("pay")
+            if can_edit and (raw_rate or pay in Worker.Pay.values):
+                rate = number(raw_rate) if raw_rate else None
+                if raw_rate and rate is None:
+                    raise ValidationError("Đơn giá không hợp lệ.")
+                services.set_worker(user, worker, day_rate=rate, pay=pay if pay in Worker.Pay.values else None, channel="web")
+    except (ValidationError, PermissionDenied) as error:
+        messages.error(request, "; ".join(getattr(error, "messages", [str(error)])))
+    else:
+        messages.success(request, f"Đã thêm {worker.name}. Chấm công qua bot ghi đúng tên này là khớp.")
+    return redirect("field_workers")
 
 
 @login_required

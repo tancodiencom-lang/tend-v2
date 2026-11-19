@@ -147,8 +147,9 @@ def _label(worker):
     return f"{worker.name} ({worker.get_kind_display().lower()}{', ' + worker.team if worker.team else ''})"
 
 
-def _person(entry, project, work_date):
-    """Một tên trong tin → dòng chấm công trong phiếu (rõ người / cần hỏi / người mới)."""
+def _person(entry, project, work_date, can_add=False):
+    """Một tên trong tin → dòng chấm công trong phiếu (rõ người / cần hỏi / người mới). Tên mới đã ghi rõ thợ/phụ
+    (vd "Thắng thợ phụ") thì lập sẵn "thêm thợ mới", không hỏi lại; tên gần giống người có sẵn thì vẫn hỏi."""
     name = " ".join(str(entry.get("name") or "").split())[:100]
     days = field.days_from(entry.get("days"), entry.get("hours"))
     row = {"name": name, "days": str(days), "team": str(entry.get("team") or "")[:100], "reason": ""}
@@ -157,6 +158,9 @@ def _person(entry, project, work_date):
         _resolve(row, result["worker"], project, work_date)
     elif result.get("candidates"):
         row.update(status="ask", candidates=[{"id": w.pk, "label": _label(w)} for w in result["candidates"]])
+    elif entry.get("kind") in ("tho", "phu") and can_add:
+        row.update(status="new_ok", new={"name": name, "team": row["team"], "kind": entry["kind"],
+                                         "kind_label": "thợ" if entry["kind"] == "tho" else "phụ"})
     else:
         row.update(status="new")
     return row
@@ -207,12 +211,14 @@ def build_report(link_row, data, source_text):
         lines.append(entry)
     if unknown:
         raise ValidationError("Không thấy chi tiết " + ", ".join(unknown) + f" trên bản vẽ {project.code}. Nhắn lại đúng mã (vd T2.5).")
-    people = [_person(p, project, work_date) for p in data.get("people") or [] if str(p.get("name") or "").strip()]
+    can_add = field.can_add_workers(user)
+    people = [_person(p, project, work_date, can_add) for p in data.get("people") or [] if str(p.get("name") or "").strip()]
     photos = _unassigned_photos(link_row)
     with transaction.atomic():
         proposal = Proposal.objects.create(link=link_row, project=project, kind=Proposal.Kind.REPORT, source_text=source_text[:5000],
                                            payload={"work_date": work_date.isoformat(), "note": str(data.get("note") or "")[:5000],
-                                                    "lines": lines, "people": people})
+                                                    "lines": lines, "people": people,
+                                                    **({"unread": str(data["unread"])[:200]} if data.get("unread") else {})})
         for photo, target in zip(photos, assign_photos(photos, lines)):
             photo.proposal, photo.target = proposal, target
             photo.save(update_fields=["proposal", "target"])
@@ -281,8 +287,13 @@ def summary(proposal):
             out.append(f"• {line['code']} – {line['work']}: {value} · " + (f"{count} ảnh" if count else "chưa có ảnh"))
             if line.get("decrease_from"):
                 out.append(f"  ⚠ Thấp hơn mức đã báo {line['decrease_from']}. Lý do: {line.get('reason') or 'chưa có'}")
+        if p.get("unread"):
+            out.append(f"⚠ Bot CHƯA ĐỌC được phần: \"{p['unread']}\". Nếu là chấm công, nhắn lại kiểu: "
+                       f"{proposal.project.code if proposal.project else 'TN-22'} … Công: Thắng phụ, Thuận thợ (phiếu này chưa có các tên đó).")
         people = p.get("people") or []
-        out.append(f"Chấm công: {proposal.link.user} (giám sát, có mặt)" + (f" + {len(people)} người:" if people else ""))
+        author = proposal.link.user
+        role = "giám đốc" if author.is_director else author.get_role_display().lower()
+        out.append(f"Chấm công: {author} ({role}, có mặt)" + (f" + {len(people)} người:" if people else ", chưa có thợ nào"))
         for person in people:
             days = vn_number(Decimal(person["days"]))
             if person["status"] == "ok":
