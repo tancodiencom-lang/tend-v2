@@ -15,6 +15,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from field import rates
 from field.models import Attendance, Report, Worker
 from money import services as money
 from money.models import ACCRUALS, RECEIPTS, Entry
@@ -234,11 +235,18 @@ def month_book(user, project, first, today=None):
 
     # Chấm công
     people = defaultdict(lambda: {"days": ZERO, "dates": set(), "worker": None})
+    attendance = list(attendance)
+    rate_table = rates.table(a.worker_id for a in attendance if a.worker_id)
     for a in attendance:
         key = a.worker.name if a.worker_id else f"{a.staff} (giám sát)"
         people[key]["days"] += a.days
         people[key]["dates"].add(a.work_date)
         people[key]["worker"] = a.worker
+        if a.worker is not None:
+            pay, amount = rates.at(rate_table, a.worker, a.work_date)
+            if pay == Worker.Pay.DAILY and amount is not None:
+                people[key]["rate"] = amount
+                people[key]["cost"] = (people[key].get("cost") or ZERO) + a.days * amount
     work = Sheet(book, "Chấm công", f"{project.code} · chấm công tháng {first:%m/%Y}", "8 giờ = 1 công. Thợ tổ khoán không tính tiền công nhật.")
     head = ["Người", "Tổ", "Loại", "Hình thức", "Tổng công", "Số ngày"]
     if cost:
@@ -246,10 +254,10 @@ def month_book(user, project, first, today=None):
     table = []
     for name, v in sorted(people.items()):
         w = v["worker"]
-        row = [name, w.team if w else "", w.get_kind_display() if w else "Giám sát", w.get_pay_display() if w else "", v["days"], len(v["dates"])]
+        row = [name, w.team if w else "", (w.trade.name if w.trade_id else w.get_kind_display()) if w else "Giám sát",
+               w.get_pay_display() if w else "", v["days"], len(v["dates"])]
         if cost:
-            daily = w is not None and w.pay == Worker.Pay.DAILY and w.day_rate is not None
-            row += [w.day_rate if w else None, v["days"] * w.day_rate if daily else None]
+            row += [v.get("rate"), v.get("cost")]
         table.append(row)
     work.table(head, table, {"Tổng công": QTY, "Đơn giá": MONEY, "Thành tiền công nhật": MONEY}, {"Người": 28})
 
@@ -278,8 +286,8 @@ def profit_book(user, projects, today=None):
     sheet = Sheet(book, "Lãi lỗ", f"Lãi lỗ các công trình · {today:%d/%m/%Y}",
                   "Lãi dự báo = doanh thu − chi phí đã phát sinh − giá vốn phần việc còn lại. "
                   "Lãi theo tiến độ = giá trị đã làm (giá bán × %) − chi phí đã phát sinh.")
-    head = ["Công trình", "Doanh thu (hợp đồng)", "Giá trị đã làm", "Hàng NCC", "Khoán tổ thợ", "Công nhật (ước tính)", "Chi khác",
-            "Chi phí đã phát sinh", "Lãi theo tiến độ", "Giá vốn còn lại", "Lãi dự báo", "Tỷ lệ lãi dự báo", "Ghi chú"]
+    head = ["Công trình", "Doanh thu (hợp đồng)", "Giá trị đã làm", "Hàng NCC", "Khoán tổ thợ", "Công nhật (ước tính)",
+            "Lương tháng phân bổ", "Chi khác", "Chi phí đã phát sinh", "Lãi theo tiến độ", "Giá vốn còn lại", "Lãi dự báo", "Tỷ lệ lãi dự báo", "Ghi chú"]
     table, total = [], defaultdict(lambda: ZERO)
     for project in projects:
         pro = profit(project, today)
@@ -288,19 +296,19 @@ def profit_book(user, projects, today=None):
         if pro["missing_cost"]:
             notes.append(f"{pro['missing_cost']} chi tiết chưa có giá vốn")
         if pro["missing_rates"]:
-            notes.append("thợ chưa có đơn giá: " + ", ".join(pro["missing_rates"]))
+            notes.append("nhân sự chưa có đơn giá: " + ", ".join(pro["missing_rates"]))
         if not pro["revenue"]:
             notes.append("chưa có giá trị hợp đồng")
         no_sale = sum(1 for r in rows(project) if r.item.sale_price is None)
         if no_sale:
             notes.append(f"{no_sale} chi tiết chưa có giá bán (giá trị đã làm tính thiếu)")
         row = [f"{project.code} · {project.name}", pro["revenue"], pro["earned"], parts["goods"], parts["team"], parts["labor"],
-               parts["other"], pro["incurred"], pro["earned"] - pro["incurred"], pro["remaining_cost"], pro["forecast"],
+               parts["salary"], parts["other"], pro["incurred"], pro["earned"] - pro["incurred"], pro["remaining_cost"], pro["forecast"],
                _pct(pro["ratio"]), "; ".join(notes)]
-        for key, value in zip(head[1:11], row[1:11]):
+        for key, value in zip(head[1:12], row[1:12]):
             total[key] += value or ZERO
         table.append(row)
-    table.append(["TỔNG"] + [total[k] for k in head[1:11]] + [None, ""])
-    sheet.table(head, table, {k: MONEY for k in head[1:11]} | {"Tỷ lệ lãi dự báo": PCT}, {"Công trình": 34, "Ghi chú": 40})
+    table.append(["TỔNG"] + [total[k] for k in head[1:12]] + [None, ""])
+    sheet.table(head, table, {k: MONEY for k in head[1:12]} | {"Tỷ lệ lãi dự báo": PCT}, {"Công trình": 34, "Ghi chú": 40})
     sheet.ws.cell(row=sheet.row - 2, column=1).font = Font(bold=True)
     return _bytes(book)

@@ -1,5 +1,6 @@
 """Tìm thợ theo tên gõ trong tin nhắn: đúng tên (bỏ dấu) thì lấy luôn; gần giống thì hỏi lại để không tạo trùng người."""
 import difflib
+import re
 from datetime import timedelta
 
 from django.utils import timezone
@@ -18,6 +19,10 @@ def recent_for(project, days=60):
 
 def match(name, project=None, workers=None):
     """→ {"worker": Worker} nếu chắc chắn; {"candidates": [Worker…]} nếu cần hỏi lại; {} nếu là tên mới."""
+    code = re.fullmatch(r"\s*ns[-\s]?(\d{1,5})\s*", str(name or ""), re.I)
+    if code:                       # "NS-0012", "ns12": theo mã nhân sự (không đổi), chắc chắn đúng người
+        found = Worker.objects.filter(code=f"NS-{int(code.group(1)):04d}").first()
+        return {"worker": found} if found else {}
     workers = list(workers if workers is not None else Worker.objects.filter(active=True))
     key = fold(name)
     if not key:

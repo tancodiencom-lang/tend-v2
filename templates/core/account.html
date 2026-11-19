@@ -21,8 +21,8 @@
   <p><a class="btn" href="{% url 'chat_connect' %}">Kết nối Telegram</a></p>
 </section>
 <section class="box">
-  {% if user.is_director %}<p><a class="btn" href="{% url 'staff' %}">Nhân viên: thêm tài khoản, vai, công trình, số điện thoại</a></p>{% endif %}
-  {% if user.is_director or user.role == "supervisor" or user.role == "internal" %}<p><a href="{% url 'field_workers' %}">Danh sách thợ (thêm thợ để bot khớp tên khi chấm công)</a></p>{% endif %}
+  {% if user.is_director %}<p><a class="btn" href="{% url 'staff' %}">Tài khoản đăng nhập: thêm, vai, công trình, số điện thoại</a></p>{% endif %}
+  {% if user.is_director or user.role == "supervisor" or user.role == "internal" %}<p><a href="{% url 'field_workers' %}">Nhân sự được chấm công (mã NS, nghề, đơn giá)</a></p>{% endif %}
   <p><a href="{% url 'password' %}">Đổi mật khẩu</a></p>
   {% if user.is_staff %}<p><a href="{% url 'admin:index' %}">Thiết lập (tài khoản, công trình, thợ)</a></p>{% endif %}
   <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn plain" type="submit">Đăng xuất</button></form>

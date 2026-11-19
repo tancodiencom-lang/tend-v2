@@ -10,6 +10,7 @@ from django.utils import timezone
 from asks import services as asks
 from core.text import fold, vn_number, vnd
 from drawings.models import Item
+from field import rates
 from field.models import Attendance, Worker
 from field.workers import match
 from overview.compute import answers, rows as progress_rows
@@ -88,15 +89,19 @@ def attendance_summary(user, code=None, name=None, start=None, end=None):
         key = fold(name)
         rows = [r for r in rows if key in fold(str(r.worker or r.staff))]
     people = defaultdict(lambda: {"days": Decimal(0), "projects": set(), "cost": Decimal(0), "missing_rate": False})
+    rows = list(rows)
+    rate_table = rates.table(r.worker_id for r in rows if r.worker_id)
     for r in rows:
         person = people[(r.worker.name if r.worker else str(r.staff), r.worker.team if r.worker else "Giám sát")]
         person["days"] += r.days
         person["projects"].add(r.project.code)
-        if r.worker and r.worker.pay == Worker.Pay.DAILY:
-            if r.worker.day_rate is None:
-                person["missing_rate"] = True
-            else:
-                person["cost"] += r.days * r.worker.day_rate
+        if r.worker:
+            pay, amount = rates.at(rate_table, r.worker, r.work_date)
+            if pay == Worker.Pay.DAILY:
+                if amount is None:
+                    person["missing_rate"] = True
+                else:
+                    person["cost"] += r.days * amount
     out = {"from": start.strftime("%d/%m/%Y"), "to": end.strftime("%d/%m/%Y"), "people": []}
     for (who, team), v in sorted(people.items()):
         row = {"name": who, "team": team, "days": float(v["days"]), "projects": sorted(v["projects"])}

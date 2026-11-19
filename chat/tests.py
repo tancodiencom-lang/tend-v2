@@ -192,7 +192,7 @@ class ReportTests(BotCase):
         self.assertEqual({p.target for p in proposal.photos.all()},
                          {f"item:{Item.objects.get(code='T1.2').pk}", f"item:{Item.objects.get(code='S1.1').pk}"})
         summary = bot.summary(proposal)
-        self.assertIn("Nam (phụ, xây): 1 công", summary)
+        self.assertIn("Nam (thợ phụ, xây): 1 công", summary)
         self.assertIn("Lan: 0,5 công · ? chưa rõ người", summary)
         self.assertIn("Còn thiếu: xác định người", summary)
         asked = [t for t in self.texts() if "chưa có trong danh sách thợ" in t]
@@ -210,8 +210,8 @@ class ReportTests(BotCase):
         self.assertEqual(sorted((l.item.code, l.percent) for l in report.lines.all()), [("S1.1", Decimal("100.0")), ("T1.2", Decimal("40.0"))])
         self.assertEqual(Photo.objects.filter(line__item__code="T1.2").count(), 1)
         days = {str(a.worker or a.staff): a.days for a in Attendance.objects.filter(work_date=today)}
-        self.assertEqual(days, {"Minh": Decimal("1.00"), "Nam (phụ, xây)": Decimal("1.00"), "Lan (phụ, xây)": Decimal("0.50"),
-                                "Tâm (thợ)": Decimal("0.50")})                     # sau ";" là nhóm mới, chưa có tổ
+        self.assertEqual(days, {"Minh": Decimal("1.00"), "Nam (thợ phụ, xây)": Decimal("1.00"), "Lan (thợ phụ, xây)": Decimal("0.50"),
+                                "Tâm (thợ chính)": Decimal("0.50")})                     # sau ";" là nhóm mới, chưa có tổ
         self.assertTrue(AuditLog.objects.filter(table="field.Worker", action="create", channel="telegram").exists())
         self.assertTrue(any("BÁO CÁO TN-22" in t for t in self.texts(self.chats[self.director.pk])))
         self.press(self.site, f"ok:{proposal.pk}")
@@ -643,7 +643,7 @@ class WorkerPageAddTests(BotCase):
         self.assertEqual((worker.kind, worker.team, worker.day_rate), ("phu", "xây", Decimal(350000)))
         self.assertTrue(AuditLog.objects.filter(table="field.Worker", object_id=str(worker.pk), action="create", channel="web").exists())
         page = self.client.post(reverse("field_workers"), {"action": "add", "name": "thang"}, follow=True)
-        self.assertContains(page, "Đã có thợ tên")
+        self.assertContains(page, "Đã có người tên")
         self.client.force_login(self.site)
         self.client.post(reverse("field_workers"), {"action": "add", "name": "Tuấn", "kind": "tho", "day_rate": "999"})
         self.assertIsNone(Worker.objects.get(name="Tuấn").day_rate)              # giám sát thêm thợ, không đặt giá

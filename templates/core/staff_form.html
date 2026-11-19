@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}{% if person %}{{ person.username }}{% else %}Thêm tài khoản{% endif %}{% endblock %}
 {% block content %}
-<p><a href="{% url 'staff' %}">‹ Nhân viên</a></p>
+<p><a href="{% url 'staff' %}">‹ Tài khoản đăng nhập</a></p>
 <h1>{% if person %}{{ person }} <span class="muted">({{ person.username }})</span>{% else %}Thêm tài khoản{% endif %}</h1>
 {% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
 {% if person and not person.is_active %}<p class="err">▼ Tài khoản đang khoá: không đăng nhập được, bot không làm việc với người này.</p>{% endif %}

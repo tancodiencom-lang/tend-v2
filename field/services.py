@@ -16,7 +16,7 @@ from core.models import Role
 from drawings.models import Item
 from projects.models import Project, projects_for
 
-from .models import Attendance, Photo, Report, ReportLine, Worker
+from .models import Attendance, Photo, Report, ReportLine, Trade, Worker, WorkerRate
 
 HOURS_PER_DAY = Decimal(8)
 HUNDRED = Decimal(100)
@@ -93,35 +93,96 @@ def worker_day_total(worker, work_date, exclude_project=None):
 
 
 @transaction.atomic
-def add_worker(user, name, team="", kind=Worker.Kind.SKILLED, channel="telegram"):
+def add_worker(user, name, team="", kind=Worker.Kind.SKILLED, channel="telegram", trade=None, pay=None, person=None):
+    """Thêm hồ sơ nhân sự, cấp mã NS-xxxx (một lần, không đổi, không dùng lại)."""
     if not can_add_workers(user):
-        raise PermissionDenied("Anh/chị không được thêm thợ.")
+        raise PermissionDenied("Anh/chị không được thêm nhân sự.")
     name = " ".join(str(name).split())[:100]
     if not name:
-        raise ValidationError("Thiếu tên thợ.")
-    worker = Worker(name=name, team=" ".join(str(team or "").split())[:100], kind=kind)
-    return record_save(worker, user, "Thêm thợ mới", channel=channel)
+        raise ValidationError("Thiếu họ tên.")
+    worker = Worker(name=name, team=" ".join(str(team or "").split())[:100],
+                    kind=kind if kind in Worker.Kind.values else Worker.Kind.SKILLED, trade=trade, user=person, code=next_code())
+    if pay in Worker.Pay.values:
+        worker.pay = pay
+    return record_save(worker, user, f"Thêm nhân sự {worker.code}", channel=channel)
+
+
+def next_code():
+    """NS-0001, NS-0002…: số lớn nhất đã cấp (kể cả người đã nghỉ) + 1; khoá các dòng để hai người thêm cùng lúc không trùng."""
+    last = 0
+    for code in Worker.objects.select_for_update().exclude(code__isnull=True).values_list("code", flat=True):
+        if code.startswith("NS-") and code[3:].isdigit():
+            last = max(last, int(code[3:]))
+    return f"NS-{last + 1:04d}"
 
 
 @transaction.atomic
-def set_worker(user, worker, *, day_rate=None, pay=None, team=None, kind=None, active=None, clear_rate=False, channel="web"):
+def ensure_profile(actor, person):
+    """Tài khoản giám sát có hồ sơ nhân sự (nghề Giám sát, lương tháng) để chấm công và chia lương vào công trình."""
+    existing = Worker.objects.filter(user=person).first()
+    if existing is not None or person.role != Role.SUPERVISOR:
+        return existing
+    name = " ".join(filter(None, [person.last_name, person.first_name])) or person.username
+    worker = Worker(name=name[:100], trade=Trade.objects.filter(name="Giám sát").first(), pay=Worker.Pay.MONTHLY, user=person,
+                    code=next_code())
+    return record_save(worker, actor, f"Tạo hồ sơ nhân sự {worker.code} cho tài khoản {person.username}", channel="web")
+
+
+@transaction.atomic
+def rename_worker(user, worker, name, channel="web"):
     if not can_set_rates(user):
-        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa đơn giá, hình thức trả của thợ.")
+        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa họ tên nhân sự.")
+    name = " ".join(str(name).split())[:100]
+    if not name:
+        raise ValidationError("Thiếu họ tên.")
     worker = Worker.objects.select_for_update().get(pk=worker.pk)
+    old = worker.name
+    worker.name = name
+    return record_save(worker, user, f"Đổi họ tên {worker.code}: {old} → {name}", channel=channel)
+
+
+@transaction.atomic
+def set_rate(user, worker, amount, start=None, pay=None, channel="web"):
+    """Đơn giá mới áp dụng từ ngày `start` (mặc định hôm nay); đơn giá đầu tiên áp dụng cho cả công trước đó.
+    Công đã qua giữ giá cũ. Cùng ngày hiệu lực thì thay giá ngày đó; mọi lần đều có nhật ký."""
+    if not can_set_rates(user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ đặt đơn giá.")
+    worker = Worker.objects.select_for_update().get(pk=worker.pk)
+    if amount is not None and not (0 <= Decimal(amount) <= 200_000_000):
+        raise ValidationError("Đơn giá không hợp lệ.")
+    pay = pay if pay in Worker.Pay.values else worker.pay
+    first = not worker.rates.exists()
+    start = date(2000, 1, 1) if first else (start or timezone.localdate())
+    rate = WorkerRate.objects.filter(worker=worker, start=start).first() or WorkerRate(worker=worker, start=start)
+    rate.pay, rate.amount, rate.created_by = pay, (Decimal(amount) if amount is not None else None), user
+    record_save(rate, user, f"Đơn giá đầu tiên {worker.code}" if first else f"Đơn giá {worker.code} từ {start:%d/%m/%Y}",
+                channel=channel)
+    latest = worker.rates.filter(start__lte=timezone.localdate()).order_by("-start").first()
+    if latest is not None and (worker.day_rate, worker.pay) != (latest.amount, latest.pay):
+        worker.day_rate, worker.pay = latest.amount, latest.pay
+        record_save(worker, user, f"Đơn giá hiện hành {worker.code}", channel=channel)
+    return rate
+
+
+@transaction.atomic
+def set_worker(user, worker, *, day_rate=None, pay=None, team=None, kind=None, active=None, clear_rate=False, trade=None,
+               rate_start=None, channel="web"):
+    """Sửa tổ, bậc, nghề, đang làm; đơn giá/hình thức trả qua set_rate (có ngày hiệu lực, không đổi công đã qua)."""
+    if not can_set_rates(user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa đơn giá, hình thức trả của nhân sự.")
+    worker = Worker.objects.select_for_update().get(pk=worker.pk)
+    if clear_rate or day_rate is not None or (pay is not None and pay != worker.pay):
+        set_rate(user, worker, None if clear_rate else (day_rate if day_rate is not None else worker.day_rate), rate_start,
+                 pay or worker.pay, channel=channel)
+        worker.refresh_from_db()
     changes = []
-    if clear_rate:
-        worker.day_rate = None
-        changes.append("bỏ đơn giá")
-    elif day_rate is not None:
-        if Decimal(day_rate) < 0 or Decimal(day_rate) > 10_000_000:
-            raise ValidationError("Đơn giá ngày công không hợp lệ.")
-        worker.day_rate = Decimal(day_rate)
-        changes.append("đơn giá")
-    for field, value in (("pay", pay), ("team", team), ("kind", kind), ("active", active)):
-        if value is not None:
+    for field, value in (("team", team), ("kind", kind), ("active", active), ("trade", trade)):
+        if value is not None and getattr(worker, field) != value:
             setattr(worker, field, value)
             changes.append(field)
-    return record_save(worker, user, "Sửa thợ: " + ", ".join(changes), channel=channel)
+    if changes:
+        record_save(worker, user, "Sửa nhân sự: " + ", ".join(changes), channel=channel)
+    return worker
 
 
 @transaction.atomic
