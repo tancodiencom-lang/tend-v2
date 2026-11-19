@@ -1,6 +1,7 @@
 """Cú pháp ngắn khi chưa bật trợ lý AI (hoặc đã chạm trần chi phí).
 
     TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ
+    TN-22 T2.1 58% Công Thắng thợ phụ, Thuận thợ chính      (không cần dấu hai chấm; "thợ phụ/phụ/thợ chính/thợ" sau tên)
     /suacong TN-22 17/11 Hùng 0,5 lý do về sớm
     /dongia Hùng 450000 khoán
 """
@@ -12,7 +13,10 @@ from django.utils import timezone
 from core.text import fold, number
 
 LINE = re.compile(r"(?<![\w.-])([A-Za-z]{1,3}[0-9M]\d*(?:\.\d+)+)\s*[:=]?\s*(?:(\d{1,3}(?:[.,]\d+)?)\s*%|(xong|hoan thanh|hoàn thành))", re.I)
-PEOPLE_START = re.compile(r"\b(?:cong|công|cham cong|chấm công)\s*:", re.I)
+# Bắt đầu phần chấm công: "Công:", "Công Thắng…", "Chấm công:", "Công nhân: …" (không nhầm "công trình", "công việc"…)
+PEOPLE_START = re.compile(r"(?<!\w)(?:chấm công|cham cong|công nhân|cong nhan|công|cong)(?!\w)"
+                          r"(?!\s*(?:trình|trinh|việc|viec|tác|tac|ty|nhật|nhat|đoạn|doan)(?!\w))\s*:?", re.I)
+TODAY = re.compile(r"^\s*(?:hôm nay|hom nay|hn)\s*:?\s*", re.I)
 TEAM = re.compile(r"^\s*(?:to|tổ)\s+([^:]{1,40}):\s*", re.I)
 HALF = re.compile(r"\b(?:nua ngay|nửa ngày|1/2|0[.,]5\s*(?:cong|công)?)\s*$", re.I)
 HOURS = re.compile(r"\b(\d{1,2}(?:[.,]\d+)?)\s*(?:h|gio|giờ|tieng|tiếng)\s*$", re.I)
@@ -24,13 +28,41 @@ def find_project(text, projects):
     return found or (projects[0] if len(projects) == 1 else None)
 
 
-def people(text):
-    """"Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ" → [{name, team, days|hours}]."""
-    m = PEOPLE_START.search(text)
+def _kind(words):
+    """Chữ "thợ phụ"/"phụ" hoặc "thợ chính"/"thợ" ở CUỐI tên → (tên còn lại, "phu"|"tho"|None). Tên một chữ giữ nguyên
+    (vd người tên Phú)."""
+    folded = [fold(w) for w in words]
+    for tail, kind in ((["tho", "phu"], "phu"), (["tho", "chinh"], "tho"), (["phu"], "phu"), (["tho"], "tho")):
+        if len(words) > len(tail) and folded[-len(tail):] == tail:
+            return words[:-len(tail)], kind
+    return words, None
+
+
+def people_start(text):
+    """Chỗ bắt đầu phần chấm công: dấu hiệu "công…" nằm SAU dòng báo cáo cuối cùng (tránh "báo cáo + chấm công hôm nay"
+    ở đầu tin); tin chỉ có chấm công thì lấy dấu hiệu cuối."""
+    marks = list(PEOPLE_START.finditer(text))
+    if not marks:
+        return None
+    lines = list(LINE.finditer(text))
+    if lines:
+        after = [m for m in marks if m.start() >= lines[-1].end()]
+        return after[0] if after else None
+    return marks[-1]
+
+
+def people(text, project_code=None):
+    """"Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ" / "Công Thắng thợ phụ, Thuận thợ chính"
+    → [{name, team, days|hours, kind?}]."""
+    m = people_start(text)
     if not m:
         return []
+    rest = text[m.end():]
+    if project_code:              # "chấm công hôm nay TN-22: Hùng…": mã công trình không phải tên người
+        rest = re.sub(rf"(?<![\w-]){re.escape(project_code)}(?![\w-])\s*:?", " ", rest, flags=re.I)
+    rest = TODAY.sub("", rest, count=1)
     out = []
-    for group in re.split(r"[;\n]", text[m.end():]):
+    for group in re.split(r"[;\n]", rest):
         team = ""
         t = TEAM.match(group)
         if t:
@@ -46,8 +78,11 @@ def people(text):
                     entry.update({"days": 0.5} if key is None else {key: float(number(hit.group(1)))})
                     part = part[:hit.start()].strip()
                     break
-            if part:
-                entry["name"] = " ".join(part.split())
+            words, kind = _kind(part.split())
+            if words:
+                entry["name"] = " ".join(words)
+                if kind:
+                    entry["kind"] = kind
                 out.append(entry)
     return out
 
@@ -56,16 +91,23 @@ def report(text, projects):
     project = find_project(text, projects)
     if project is None:
         return None
-    body = PEOPLE_START.split(text, maxsplit=1)[0]
-    lines = []
+    start = people_start(text)
+    body = text[:start.start()] if start else text
+    lines, last = [], 0
     for m in LINE.finditer(body):
         if m.group(1).casefold() == project.code.casefold():
             continue
         lines.append({"code": m.group(1), "percent": 100.0 if m.group(3) else float(number(m.group(2)))})
-    who = people(text)
+        last = m.end()
+    who = people(text, project.code)
     if not lines and not who:
         return None
-    return {"project_code": project.code, "lines": lines, "people": who, "note": text.strip()[:2000]}
+    out = {"project_code": project.code, "lines": lines, "people": who, "note": text.strip()[:2000]}
+    if not who:      # còn chữ sau dòng báo cáo cuối mà không đọc ra chấm công: báo cho người gửi, không lặng lẽ bỏ
+        tail = " ".join(text[last:].strip(" .,;").split())
+        if re.search(r"[^\W\d_]{2,}", tail):
+            out["unread"] = tail[:200]
+    return out
 
 
 def day(text, today=None):

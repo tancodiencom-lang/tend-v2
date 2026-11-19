@@ -591,3 +591,61 @@ class ArchiveTests(BotCase):
         send({"file_id": "pdf1", "file_unique_id": "pdf1", "file_size": 100, "mime_type": "application/pdf"})
         self.assertEqual(ChatPhoto.objects.count(), 1)
         self.assertIn("JPG, PNG hoặc WEBP", self.texts()[-1])
+
+
+class AttendanceWordingTests(BotCase):
+    """Tin thật của Giám đốc 20/11/2026: chấm công không có dấu hai chấm, có chữ "thợ phụ"/"thợ chính"."""
+
+    def test_owner_message_reads_people_and_kinds(self):
+        from field.models import Attendance, Worker
+        self.message(self.director, "Báo cáo + chấm công hôm nay tn-22 t1.2 58% Công Thắng thợ phụ, Thuận thợ chính")
+        proposal = self.proposal()
+        people = {p["name"]: (p["status"], p.get("new", {}).get("kind")) for p in proposal.payload["people"]}
+        self.assertEqual(people, {"Thắng": ("new_ok", "phu"), "Thuận": ("new_ok", "tho")})
+        summary = bot.summary(proposal)
+        self.assertIn("(giám đốc, có mặt) + 2 người", summary)
+        self.assertIn("Thắng: 1 công · thêm thợ mới (phụ)", summary)
+        self.assertIn("✓ Xác nhận", self.last_buttons(self.chats[self.director.pk]))
+        self.press(self.director, f"ok:{proposal.pk}")
+        self.assertEqual({(w.name, w.kind) for w in Worker.objects.filter(name__in=["Thắng", "Thuận"])}, {("Thắng", "phu"), ("Thuận", "tho")})
+        self.assertEqual(Attendance.objects.filter(worker__name__in=["Thắng", "Thuận"]).count(), 2)
+        self.message(self.site, "TN-22 T1.2 60% công Thắng, Nam phụ")              # lần sau: khớp người có sẵn
+        names = {p["name"]: p["status"] for p in self.proposal().payload["people"]}
+        self.assertEqual(names, {"Thắng": "same", "Nam": "ok"})                    # Thắng đã chấm hôm nay: khớp người, giữ nguyên
+
+    def test_unread_part_is_flagged_not_silently_dropped(self):
+        self.message(self.site, "TN-22 T1.2 40% Thắng, Thuận")
+        summary = bot.summary(self.proposal())
+        self.assertIn("CHƯA ĐỌC được phần: \"Thắng, Thuận\"", summary)
+        self.assertIn("chưa có thợ nào", summary)
+
+    def test_parse_variants(self):
+        from types import SimpleNamespace
+        from . import parse
+        projects = [SimpleNamespace(code="TN-22")]
+        cases = {
+            "TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ": ["Hùng", "Nam", "Lan", "Tâm"],
+            "chấm công hôm nay TN-22: Hùng, Nam phụ": ["Hùng", "Nam"],
+            "TN-22 T1.2 40% công nhân: Phú 4h": ["Phú"],                         # tên một chữ "Phú" không bị coi là "phụ"
+            "TN-22 công trình T1.2 40% xong sớm": [],                             # "công trình" không phải chấm công
+        }
+        for text, names in cases.items():
+            self.assertEqual([p["name"] for p in parse.report(text, projects)["people"]], names, text)
+
+
+class WorkerPageAddTests(BotCase):
+    def test_add_worker_on_web(self):
+        from field.models import Worker
+        self.client.force_login(self.accountant)
+        self.client.post(reverse("field_workers"), {"action": "add", "name": "Thắng", "team": "xây", "kind": "phu",
+                                                    "pay": "cong_nhat", "day_rate": "350.000"})
+        worker = Worker.objects.get(name="Thắng")
+        self.assertEqual((worker.kind, worker.team, worker.day_rate), ("phu", "xây", Decimal(350000)))
+        self.assertTrue(AuditLog.objects.filter(table="field.Worker", object_id=str(worker.pk), action="create", channel="web").exists())
+        page = self.client.post(reverse("field_workers"), {"action": "add", "name": "thang"}, follow=True)
+        self.assertContains(page, "Đã có thợ tên")
+        self.client.force_login(self.site)
+        self.client.post(reverse("field_workers"), {"action": "add", "name": "Tuấn", "kind": "tho", "day_rate": "999"})
+        self.assertIsNone(Worker.objects.get(name="Tuấn").day_rate)              # giám sát thêm thợ, không đặt giá
+        self.client.force_login(self.designer)
+        self.assertEqual(self.client.post(reverse("field_workers"), {"action": "add", "name": "X"}).status_code, 403)
