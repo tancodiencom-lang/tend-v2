@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Nhân viên{% endblock %}
+{% block content %}
+<p><a href="{% url 'account' %}">‹ Tài khoản</a></p>
+<h1>Nhân viên</h1>
+<p class="muted">Số điện thoại phải đúng số người đó dùng đăng ký Telegram: khi kết nối, bot hỏi số qua nút 📱 của Telegram và chỉ
+kết nối khi trùng số ở đây. Thêm tài khoản, đổi vai, giao công trình: Tài khoản › Thiết lập.</p>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+<div class="scroll"><table class="grid"><thead><tr><th>Người</th><th>Vai</th><th>Đăng nhập</th><th>Telegram</th><th>Số điện thoại</th></tr></thead><tbody>
+{% for row in rows %}{% with u=row.user %}<tr>
+  <td>{{ u }}</td><td>{% if u.is_superuser %}Giám đốc{% else %}{{ u.get_role_display }}{% endif %}</td><td>{{ u.username }}</td>
+  <td>{% if row.linked %}✓ Đã kết nối{% elif u.phone %}● Chưa kết nối{% else %}▼ Thiếu số, chưa kết nối được{% endif %}</td>
+  <td><form method="post" class="acts">{% csrf_token %}<input type="hidden" name="nguoi" value="{{ u.pk }}">
+    <input name="dien_thoai" value="{{ u.phone }}" inputmode="tel" placeholder="nhập số, vd 09xx xxx xxx" aria-label="Số điện thoại {{ u }}">
+    <button class="btn plain" type="submit">Lưu</button></form></td>
+</tr>{% endwith %}{% endfor %}
+</tbody></table></div>
+{% endblock %}

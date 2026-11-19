@@ -80,8 +80,8 @@ cũ vẫn ở so.tend.vn. Chạy lại lệnh chép không chép trùng (bỏ qu
    sudo bash /srv/tend-v2/app/ha-tang/trien-khai.sh
    ```
 
-4. Giám đốc nhập **số điện thoại** cho từng tài khoản (app.tend.vn › Tài khoản › Thiết lập › Người dùng › chọn người ›
-   Điện thoại) — đúng số người đó đăng ký Telegram.
+4. Giám đốc nhập **số điện thoại** cho từng tài khoản: app.tend.vn › Tài khoản › **Nhân viên** (một bảng: mỗi người một ô
+   số, bấm Lưu) — đúng số người đó đăng ký Telegram. Bảng này cũng cho biết ai đã kết nối Telegram.
 5. Mỗi người vào app.tend.vn › Tài khoản › Kết nối Telegram › Lấy mã kết nối, nhắn mã cho bot, rồi bấm nút 📱 bot gửi để
    chia sẻ số điện thoại. Số trùng mới kết nối; lộ mã cũng không sao (khác số thì bị từ chối, Giám đốc được báo).
 

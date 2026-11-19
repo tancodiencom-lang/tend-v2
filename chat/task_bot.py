@@ -41,6 +41,18 @@ def people(user):
     return list(User.objects.filter(is_active=True).exclude(pk=user.pk))
 
 
+def tell(user, text, buttons=None):
+    _tell(user, text, buttons)
+
+
+def notify_done(task, user):
+    _tell_directors(f"{task.owner} báo XONG việc #{task.pk}: {task.title}"
+                    + (f"\nGhi chú: {task.report_note}" if task.report_note else "")
+                    + (f"\nTiêu chí: {task.criteria}" if task.criteria else ""),
+                    [[{"text": "✓ Nhận kết quả", "data": f"ta:{task.pk}"}, {"text": "↩ Trả lại", "data": f"tr:{task.pk}"}]],
+                    exclude=user)
+
+
 # ---------- giao việc: phiếu chờ Giám đốc xác nhận ----------
 
 def build(link_row, data, source_text):
@@ -140,11 +152,7 @@ def handle(link_row, command, text, state_set):
         if task is None:
             return "Cú pháp: /xong 12 [ghi chú] (12 là số việc trong /viec).", None
         task = tasks.report_done(user, task, note)
-        _tell_directors(f"{task.owner} báo XONG việc #{task.pk}: {task.title}"
-                        + (f"\nGhi chú: {task.report_note}" if task.report_note else "")
-                        + (f"\nTiêu chí: {task.criteria}" if task.criteria else ""),
-                        [[{"text": "✓ Nhận kết quả", "data": f"ta:{task.pk}"}, {"text": "↩ Trả lại", "data": f"tr:{task.pk}"}]],
-                        exclude=user)
+        notify_done(task, user)
         return f"Đã báo Giám đốc việc #{task.pk} xong. Trợ lý sẽ báo lại khi Giám đốc nhận kết quả.", None
     if command == "/huyviec":
         ref, _, reason = arg.partition(" ")

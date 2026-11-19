@@ -118,3 +118,9 @@ Chủ dự án là Giám đốc, không phải lập trình viên: giải thích
 - Ảnh tài khoản hiện cỡ gốc + "QUquan": trình duyệt giữ `tend.css` cũ (tên không đổi). Sửa: `core.storage.StaticFiles` (Manifest, tên có dấu vân tay, chưa collectstatic thì dùng tên gốc) + `width/height` trên ảnh. Thanh dưới: ảnh/chữ viết tắt + **tên + chức danh**.
 - 101/101 bài kiểm trên SQLite và PostgreSQL 16.
 
+## Trang Nhân viên (số điện thoại), thao tác việc trên web (19/11/2026)
+
+- `core.views.staff` `/nhan-vien/` (chỉ Giám đốc, link ở Tài khoản): bảng người dùng, vai, tình trạng Telegram (✓/●/▼ thiếu số), sửa số điện thoại (chuẩn hoá 10 số đầu 0, không trùng người khác, nhật ký). Mọi lời nhắc "nhập số" trỏ về Tài khoản › Nhân viên.
+- Trang Trợ lý: thêm cột **Người giao** (và lúc giao); thao tác trên web như bot (`assistant.views.act`, `/tro-ly/viec/<id>/<nhan|xong|nhan-ket-qua|tra-lai|huy>/`, kênh `web`): người làm Nhận việc / Báo xong (ghi chú); Giám đốc Nhận kết quả / Trả lại (lý do) / Huỷ (lý do); báo Telegram như khi bấm trên bot (`task_bot.notify_done`, `task_bot.tell`). Giao việc mới vẫn qua bot (phiếu xác nhận).
+- 103/103 bài kiểm trên SQLite và PostgreSQL 16.
+

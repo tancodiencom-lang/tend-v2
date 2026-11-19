@@ -13,7 +13,7 @@
 <p class="muted">Hai bước: (1) nhắn mã cho bot; (2) bấm nút 📱 bot gửi để Telegram gửi số điện thoại của anh/chị. Số đó phải trùng số
 công ty đã ghi cho tài khoản này{% if user.phone %} (<b>{{ user.phone|slice:":3" }}…{{ user.phone|slice:"-3:" }}</b>){% endif %}. Lộ mã cũng không sao:
 người khác không có đúng số điện thoại thì không kết nối được, và Giám đốc được báo.</p>
-{% if not user.phone %}<p class="missing">Tài khoản chưa có số điện thoại. Nhờ Giám đốc nhập ở Thiết lập › Người dùng rồi mới lấy mã.</p>{% endif %}
+{% if not user.phone %}<p class="missing">Tài khoản chưa có số điện thoại. Nhờ Giám đốc nhập ở Tài khoản › Nhân viên rồi mới lấy mã.</p>{% endif %}
 {% if code %}<p>Mã của anh/chị (dùng một lần trong 15 phút):</p><p class="big">{{ code }}</p>
 {% if deep_link %}<p><a class="btn" href="{{ deep_link }}">Mở Telegram và kết nối</a></p>{% endif %}
 <p class="muted">Hoặc nhắn cho bot{% if bot_username %} @{{ bot_username }}{% endif %}: <b>/ketnoi {{ code }}</b></p>

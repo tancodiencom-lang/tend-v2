@@ -194,3 +194,47 @@ class PageTests(AssistantCase):
         self.assertNotContains(page, "góp ý thử")
         self.client.force_login(self.accountant)
         self.assertNotContains(self.client.get(reverse("assistant")), f"#{task.pk} ")
+
+
+class WebActionTests(AssistantCase):
+    def test_owner_accepts_and_reports_on_web_director_decides(self):
+        task = self.give(timezone.now() + timedelta(days=1))
+        self.client.force_login(self.site)
+        page = self.client.get(reverse("assistant"))
+        self.assertContains(page, "Người giao")
+        self.assertContains(page, str(self.director))
+        self.assertContains(page, "👍 Nhận việc")
+        self.client.post(reverse("assistant_act", args=[task.pk, "nhan"]))
+        task.refresh_from_db()
+        self.assertIsNotNone(task.accepted_at)
+        self.assertTrue(AuditLog.objects.filter(table="assistant.Task", reason="Nhận việc", channel="web").exists())
+        self.assertEqual(self.client.post(reverse("assistant_act", args=[task.pk, "nhan-ket-qua"])).status_code, 302)
+        self.assertEqual(Task.objects.get().state, Task.State.OPEN)                 # người làm không tự nhận kết quả
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("assistant_act", args=[task.pk, "xong"]), {"ghi_chu": "đã thử nước 24 giờ"})
+        self.assertEqual(Task.objects.get().state, Task.State.REPORTED)
+        self.assertEqual(self.last_buttons(self.chats[self.director.pk]), {"✓ Nhận kết quả": f"ta:{task.pk}", "↩ Trả lại": f"tr:{task.pk}"})
+        self.client.force_login(self.director)
+        self.client.post(reverse("assistant_act", args=[task.pk, "tra-lai"]), {"ghi_chu": ""})
+        self.assertEqual(Task.objects.get().state, Task.State.REPORTED)             # trả lại phải có lý do
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("assistant_act", args=[task.pk, "nhan-ket-qua"]))
+        self.assertEqual(Task.objects.get().state, Task.State.DONE)
+        self.assertIn("đã nhận kết quả", self.assistant_texts(self.site)[-1])
+        self.client.force_login(self.accountant)
+        self.assertEqual(self.client.post(reverse("assistant_act", args=[task.pk, "nhan"])).status_code, 404)
+
+    def test_staff_page_sets_phone_director_only(self):
+        self.client.force_login(self.site)
+        self.assertEqual(self.client.get(reverse("staff")).status_code, 403)
+        self.client.force_login(self.director)
+        page = self.client.get(reverse("staff"))
+        self.assertContains(page, "✓ Đã kết nối")
+        self.client.post(reverse("staff"), {"nguoi": self.designer.pk, "dien_thoai": "+84 912 000 111"})
+        self.designer.refresh_from_db()
+        self.assertEqual(self.designer.phone, "0912000111")
+        self.assertTrue(AuditLog.objects.filter(table="core.User", reason__startswith="Giám đốc sửa số").exists())
+        page = self.client.post(reverse("staff"), {"nguoi": self.accountant.pk, "dien_thoai": "0912000111"}, follow=True)
+        self.assertContains(page, "đã ghi cho tài khoản khác")
+        page = self.client.post(reverse("staff"), {"nguoi": self.accountant.pk, "dien_thoai": "12345"}, follow=True)
+        self.assertContains(page, "không đúng dạng")

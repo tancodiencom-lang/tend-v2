@@ -3,7 +3,7 @@
 <div class="person-head">
   {% if user.avatar %}<img class="avatar big" src="{% url 'user_avatar' user.pk %}" alt="Ảnh {{ user }}" width="64" height="64">{% else %}<span class="avatar big" aria-hidden="true">{{ initials }}</span>{% endif %}
   <div><h1>{{ user }}</h1><p class="muted">{{ role_label }} · tên đăng nhập <b>{{ user.username }}</b> · điện thoại
-  {% if user.phone %}<b>{{ user.phone }}</b>{% else %}<b>chưa có</b> (cần để kết nối Telegram; nhờ Giám đốc nhập){% endif %}</p></div>
+  {% if user.phone %}<b>{{ user.phone }}</b>{% else %}<b>chưa có</b> (cần để kết nối Telegram; {% if user.is_director %}nhập ở mục Nhân viên bên dưới{% else %}nhờ Giám đốc nhập{% endif %}){% endif %}</p></div>
 </div>
 <section class="box">
   <h2>Ảnh nhân viên</h2>
@@ -21,6 +21,7 @@
   <p><a class="btn" href="{% url 'chat_connect' %}">Kết nối Telegram</a></p>
 </section>
 <section class="box">
+  {% if user.is_director %}<p><a class="btn" href="{% url 'staff' %}">Nhân viên: số điện thoại, kết nối Telegram</a></p>{% endif %}
   {% if user.is_staff %}<p><a href="{% url 'admin:index' %}">Thiết lập (tài khoản, công trình, thợ)</a></p>{% endif %}
   <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="btn plain" type="submit">Đăng xuất</button></form>
 </section>

@@ -1,15 +1,29 @@
 {% extends "base.html" %}{% block title %}Trợ lý{% endblock %}
 {% block content %}
 <h1>Trợ lý Giám đốc</h1>
-<p class="muted">Việc giao qua bot Telegram: Giám đốc nhắn <code>/giao</code> (hoặc nói tự nhiên khi đã bật AI), người làm bấm Nhận việc,
-xong nhắn <code>/xong số</code>, Giám đốc nhận kết quả hoặc trả lại. Trợ lý nhắc trước hạn, nhắc khi trễ và báo Giám đốc nếu vẫn trễ.</p>
+<p class="muted">Giám đốc giao việc qua bot Telegram (<code>/giao</code> hoặc nói tự nhiên khi đã bật AI). Người làm bấm Nhận việc, làm xong
+bấm Báo xong — ngay ở đây hoặc trên Telegram (<code>/xong số</code>). Giám đốc nhận kết quả hoặc trả lại, cũng ở đây hoặc trên Telegram.
+Trợ lý nhắc trước hạn, nhắc khi trễ và báo Giám đốc nếu vẫn trễ.</p>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
 <h2>{% if user.is_director %}Việc đang mở{% else %}Việc của anh/chị{% endif %} ({{ open|length }}{% if late_count %}, ▼ trễ {{ late_count }}{% endif %})</h2>
-{% if open %}<div class="scroll"><table class="grid"><thead><tr><th>Số</th><th>Việc</th><th>Người làm</th><th>Công trình</th><th>Hạn</th><th>Trạng thái</th></tr></thead><tbody>
+{% if open %}<div class="scroll"><table class="grid"><thead><tr><th>Số</th><th>Việc</th><th>Người giao</th><th>Người làm</th><th>Công trình</th><th>Hạn</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>
 {% for row in open %}{% with t=row.task %}<tr>
   <td>#{{ t.pk }}</td>
   <td>{{ t.title }}{% if t.criteria %}<br><span class="muted">Xong khi: {{ t.criteria }}</span>{% endif %}{% if t.close_note %}<br><span class="muted">Trả lại: {{ t.close_note }}</span>{% endif %}</td>
+  <td>{{ t.created_by }}<br><span class="muted">{{ t.created_at|date:"d/m H:i" }}</span></td>
   <td>{{ t.owner }}</td><td>{{ t.project.code|default:"—" }}</td><td>{{ t.due|date:"d/m/Y H:i" }}</td>
-  <td>{% if t.state == "reported" %}↺ Báo xong, chờ Giám đốc nhận{% elif row.late %}▼ Trễ hạn{% elif t.accepted_at %}● Đang làm{% else %}● Chưa bấm nhận{% endif %}</td>
+  <td>{% if t.state == "reported" %}↺ Báo xong, chờ Giám đốc nhận{% if t.report_note %}<br><span class="muted">{{ t.report_note }}</span>{% endif %}{% elif row.late %}▼ Trễ hạn{% elif t.accepted_at %}● Đang làm (đã nhận {{ t.accepted_at|date:"d/m H:i" }}){% else %}● Chưa bấm nhận{% endif %}</td>
+  <td class="acts">
+    {% if row.mine and t.state == "open" %}
+      {% if not t.accepted_at %}<form method="post" action="{% url 'assistant_act' t.pk 'nhan' %}">{% csrf_token %}<button class="btn" type="submit">👍 Nhận việc</button></form>{% endif %}
+      <form method="post" action="{% url 'assistant_act' t.pk 'xong' %}">{% csrf_token %}<input name="ghi_chu" placeholder="Ghi chú khi xong (tuỳ chọn)"><button class="btn plain" type="submit">Báo xong</button></form>
+    {% endif %}
+    {% if user.is_director %}
+      {% if t.state == "reported" %}<form method="post" action="{% url 'assistant_act' t.pk 'nhan-ket-qua' %}">{% csrf_token %}<button class="btn" type="submit">✓ Nhận kết quả</button></form>
+      <form method="post" action="{% url 'assistant_act' t.pk 'tra-lai' %}">{% csrf_token %}<input name="ghi_chu" placeholder="Lý do trả lại" required><button class="btn plain" type="submit">↩ Trả lại</button></form>{% endif %}
+      <details><summary>Huỷ việc</summary><form method="post" action="{% url 'assistant_act' t.pk 'huy' %}">{% csrf_token %}<input name="ghi_chu" placeholder="Lý do huỷ" required><button class="btn plain" type="submit">Huỷ</button></form></details>
+    {% endif %}
+  </td>
 </tr>{% endwith %}{% endfor %}</tbody></table></div>{% else %}<p>Không có việc nào đang mở.</p>{% endif %}
 {% if closed %}<h2>Đã đóng trong 30 ngày</h2><ul>{% for row in closed %}<li>{{ row.line }}</li>{% endfor %}</ul>{% endif %}
 {% if user.is_director %}<h2>Câu hỏi nhân viên gửi Giám đốc qua trợ lý</h2>
