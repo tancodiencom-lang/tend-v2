@@ -1357,6 +1357,13 @@ def handle_message(message):
             return
     if not text:
         return
+    reply = message.get("reply_to_message") or {}
+    draft = marketing_bot.PREVIEW.search(reply.get("text") or "") if (reply.get("from") or {}).get("is_bot") else None
+    if draft and not sizes and not text.startswith("/"):        # trả lời vào bản duyệt bài đăng = nhờ trợ lý sửa bài đó
+        answer = marketing_bot.reply_edit(link_row, int(draft.group(1)), text)
+        if answer:
+            telegram.send(chat_id, answer)
+        return
     try:
         answer, proposal = handle_text(link_row, text)
     except (ValidationError, PermissionDenied, ValueError) as error:

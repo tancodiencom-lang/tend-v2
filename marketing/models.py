@@ -27,7 +27,10 @@ class Channel(models.Model):
     page_id = models.CharField("Mã số Trang (Facebook trả về khi kiểm tra)", max_length=40, blank=True)
     account = models.CharField("Tài khoản Meta (tên khoá trong .env)", max_length=30, blank=True,
                                help_text="Trống = TEND_META_TOKEN; CHINH = TEND_META_TOKEN_CHINH")
-    default = models.BooleanField("Đăng mặc định", default=True, help_text="Bài nháp mới chọn sẵn Trang này")
+    brief = models.TextField("Giới thiệu Trang cho trợ lý viết bài", max_length=2000, blank=True,
+                             help_text="Thương hiệu, dịch vụ, khách hàng, cách xưng hô, câu kêu gọi, hashtag cố định, điều cần tránh")
+    default = models.BooleanField("Đăng mặc định", default=True,
+                                  help_text="Trợ lý soạn bài hằng ngày cho Trang này; bài giao không chọn Trang thì đăng Trang này")
     active = models.BooleanField("Đang dùng", default=True)
     checked_at = models.DateTimeField("Kiểm tra kết nối lúc", null=True, blank=True)
     check_note = models.CharField("Kết quả kiểm tra", max_length=300, blank=True)

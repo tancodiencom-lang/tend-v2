@@ -13,6 +13,7 @@ Bài không nêu tên chủ nhà, địa chỉ, giá; ảnh đăng lên đã b�
 <form method="post" action="{% url 'marketing_idea_add' %}" class="row-form">{% csrf_token %}
   <label>Nội dung <input type="text" name="text" required placeholder="vd Trước–sau phòng khách, nhấn phào chỉ trần"></label>
   <label>Công trình <select name="project"><option value="">— tự chọn —</option>{% for p in projects %}<option value="{{ p.pk }}">{{ p.code }}</option>{% endfor %}</select></label>
+  {% if channels|length > 1 %}<label>Trang <select name="channel"><option value="">— Trang mặc định —</option>{% for c in channels %}<option value="{{ c.pk }}">{{ c.name }}</option>{% endfor %}</select></label>{% endif %}
   <label class="check"><input type="checkbox" name="now" value="1" checked> Soạn bài ngay</label>
   <button class="btn" type="submit">Giao</button>
 </form>

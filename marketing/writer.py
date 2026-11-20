@@ -16,16 +16,17 @@ from django.utils import timezone
 from chat import ai
 
 from . import assets as asset_files
-from .models import Asset, Idea, Post, StyleSample
+from .models import Asset, Channel, Idea, Post, StyleSample
 
 log = logging.getLogger(__name__)
 CANDIDATES = 12
 RECENT_DAYS = 21
 
-SYSTEM = """Bạn là biên tập viên nội dung của TenD (Công ty TNHH Tân Cổ Điển) — thiết kế, thi công nhà phố, biệt thự, nội thất
-phong cách tân cổ điển. Bạn soạn bài đăng Facebook từ ảnh công trình thật để người duyệt xem trước khi đăng.
-
-Quy tắc bắt buộc:
+# Thương hiệu KHÔNG ghi cố định ở đây: mỗi Trang (Channel) có giới thiệu riêng (`brief`) và bài mẫu riêng — TenD, New Roma…
+# là các thương hiệu khác nhau của cùng công ty (system_prompt).
+RULES = """Quy tắc bắt buộc:
+- Chỉ viết cho đúng Trang này: đúng thương hiệu, dịch vụ, cách xưng hô, câu kêu gọi, hashtag trong giới thiệu và bài mẫu
+  của Trang. Không nhắc tên, phong cách, khẩu hiệu hay hashtag của thương hiệu/Trang khác.
 - Tiếng Việt có dấu, viết theo GIỌNG VĂN của các bài mẫu (độ dài, cách mở bài, biểu tượng cảm xúc, hashtag, câu kêu gọi).
   Không có bài mẫu thì viết 80–180 chữ, ấm áp, chuyên nghiệp, kết bằng lời mời nhắn tin tư vấn.
 - KHÔNG nêu tên chủ nhà, địa chỉ, số nhà, tên đường, mã công trình nội bộ, số điện thoại cá nhân, giá tiền; không hứa giá
@@ -72,8 +73,44 @@ def pick_project(today):
     return Project.objects.filter(pk=first["project"]).first()
 
 
-def samples(limit=8):
-    return [s.text[:900] for s in StyleSample.objects.filter(active=True).order_by("-created_at")[:limit]]
+def primary_channel():
+    """Trang soạn bài khi không chỉ rõ: Trang mặc định đang dùng đầu tiên (theo tên), không có thì Trang đang dùng đầu tiên."""
+    rows = Channel.objects.filter(active=True).order_by("name")
+    return rows.filter(default=True).first() or rows.first()
+
+
+def samples(channel=None, limit=8):
+    """Bài mẫu của đúng Trang trước, rồi bài mẫu dùng chung (không gắn Trang). Không lấy bài mẫu của Trang khác."""
+    rows = StyleSample.objects.filter(active=True).order_by("-created_at")
+    own = list(rows.filter(channel=channel)[:limit]) if channel is not None else []
+    shared = list(rows.filter(channel__isnull=True)[:limit - len(own)]) if len(own) < limit else []
+    return [s.text[:900] for s in own + shared]
+
+
+def system_prompt(channel, limit=8):
+    """→ (lời dặn hệ thống, có giới thiệu hoặc bài mẫu không)."""
+    name = channel.name if channel else "của công ty"
+    parts = [f"Bạn là biên tập viên nội dung của Trang Facebook \"{name}\". Bạn soạn bài đăng Facebook từ ảnh công trình thật "
+             "để người duyệt xem trước khi đăng."]
+    brief = (channel.brief or "").strip() if channel else ""
+    if brief:
+        parts.append("GIỚI THIỆU TRANG (người quản lý Trang viết; viết đúng thương hiệu, dịch vụ, cách xưng hô, câu kêu gọi, "
+                     "hashtag ở đây):\n" + brief)
+    else:
+        parts.append(f"Trang chưa có giới thiệu: chỉ xưng tên Trang \"{name}\"; không tự gán dòng sản phẩm, phong cách, khẩu hiệu "
+                     "hay hashtag thương hiệu nào.")
+    parts.append(RULES)
+    style = samples(channel, limit)
+    if style:
+        parts.append("CÁC BÀI MẪU GIỌNG VĂN CỦA TRANG:\n" + "\n---\n".join(style))
+    return "\n\n".join(parts), bool(brief or style)
+
+
+def _voice_note(channel, known):
+    if known or channel is None:
+        return ""
+    return (f" ⚠ Trang \"{channel.name}\" chưa có giới thiệu và bài mẫu nên giọng văn, thương hiệu có thể chưa đúng: vào "
+            "Nội dung › Cài đặt điền Giới thiệu Trang hoặc lấy bài cũ làm mẫu.")
 
 
 def _image_blocks(items):
@@ -89,20 +126,21 @@ def _image_blocks(items):
     return blocks
 
 
-def template_text(items, brief=""):
+def template_text(items, brief="", channel=None):
+    """Chữ mẫu khi chưa bật AI: không gắn thương hiệu nào ngoài tên Trang (người duyệt sửa trước khi đăng)."""
     works = list(dict.fromkeys(a.context.split(" · ")[0] for a in items if a.context and not a.context.startswith("ảnh chung")))
     topic = brief or (", ".join(works[:3]).lower() if works else "hình ảnh thi công")
-    return (f"✨ Cập nhật công trình tân cổ điển TenD: {topic}.\n\nTừng chi tiết được đội ngũ TenD thi công tỉ mỉ, đúng thiết kế. "
-            "Anh chị đang chuẩn bị xây nhà, cải tạo nội thất phong cách tân cổ điển, nhắn tin cho TenD để được tư vấn nhé!\n\n"
-            "#TenD #tancodien #noithattancodien")
+    who = channel.name if channel else "chúng tôi"
+    return (f"✨ Cập nhật công trình: {topic}.\n\nTừng chi tiết được đội ngũ thi công tỉ mỉ, đúng thiết kế. "
+            f"Anh chị cần tư vấn, nhắn tin cho {who} nhé!")
 
 
-def write(items, brief=""):
-    """→ {"text", "assets": [Asset theo thứ tự], "note", "ai": bool}. AI lỗi hoặc chưa bật: chữ mẫu, giữ tối đa 6 ảnh."""
+def write(items, brief="", channel=None):
+    """→ {"text", "assets": [Asset theo thứ tự], "note", "ai": bool}. AI lỗi hoặc chưa bật: chữ mẫu, giữ tối đa 6 ảnh.
+    `channel`: Trang sẽ đăng — trợ lý viết theo giới thiệu và bài mẫu của Trang đó."""
     items = list(items)
+    system, known = system_prompt(channel)
     if ai.available() and items:
-        style = samples()
-        system = SYSTEM + ("\n\nCÁC BÀI MẪU GIỌNG VĂN:\n" + "\n---\n".join(style) if style else "")
         ask = ("Soạn một bài đăng từ các ảnh trên." + (f" Yêu cầu của người giao bài: {brief}" if brief else "")
                + " Trả về JSON theo khuôn.")
         try:
@@ -117,16 +155,20 @@ def write(items, brief=""):
             chosen = [items[i] for i in dict.fromkeys(data.get("photos") or []) if isinstance(i, int) and 0 <= i < len(items)]
             text = str(data.get("text") or "").strip()
             if chosen and text:
-                return {"text": text, "assets": chosen[:10], "note": str(data.get("note") or "")[:1000], "ai": True}
+                note = (str(data.get("note") or "") + _voice_note(channel, known)).strip()
+                return {"text": text, "assets": chosen[:10], "note": note[:1000], "ai": True}
         except Exception as error:      # mạng/khoá/khuôn lỗi: vẫn có bài nháp để người duyệt sửa
             log.warning("AI soạn bài lỗi (%s)", type(error).__name__)
     note = "Chưa bật trợ lý AI (hoặc AI lỗi): chữ mẫu, cần sửa trước khi duyệt." if items else "Kho chưa có ảnh phù hợp."
-    return {"text": template_text(items[:6], brief), "assets": items[:6], "note": note, "ai": False}
+    return {"text": template_text(items[:6], brief, channel), "assets": items[:6], "note": note + _voice_note(channel, known),
+            "ai": False}
 
 
-def draft(today, project=None, idea=None, brief="", origin=Post.Origin.DAILY, user=None, items=None):
-    """Lập một bài nháp. `items`: ảnh người giao bài gửi kèm (ưu tiên), không thì lấy từ kho theo công trình."""
+def draft(today, project=None, idea=None, brief="", origin=Post.Origin.DAILY, user=None, items=None, channel=None):
+    """Lập một bài nháp cho MỘT Trang (`channel`, mặc định primary_channel). `items`: ảnh người giao bài gửi kèm (ưu tiên),
+    không thì lấy từ kho theo công trình."""
     from .services import create_post
+    channel = channel or primary_channel()
     project = project or (idea.project if idea else None)
     pool = list(items or [])
     if len(pool) < 3:
@@ -134,24 +176,27 @@ def draft(today, project=None, idea=None, brief="", origin=Post.Origin.DAILY, us
                  if a not in pool][: CANDIDATES - len(pool)]
     if not pool and not brief and idea is None:
         return None
-    result = write(pool, brief or (idea.text if idea else ""))
+    result = write(pool, brief or (idea.text if idea else ""), channel)
     chosen_project = project or next((a.project for a in result["assets"] if a.project_id), None)
     return create_post(user, result["text"], result["assets"], today, project=chosen_project, origin=origin, idea=idea,
-                       note=result["note"], ai_written=result["ai"])
+                       note=result["note"], ai_written=result["ai"], channels=[channel] if channel else None)
 
 
 def daily(now=None):
-    """Bài nháp hằng ngày: đủ TEND_MKT_DAILY bài (mặc định 1) cho hôm nay; ưu tiên yêu cầu và ý tưởng đang mở."""
+    """Bài nháp hằng ngày: MỖI Trang mặc định đủ TEND_MKT_DAILY bài (mặc định 1) cho hôm nay, viết theo giọng của Trang đó;
+    ưu tiên yêu cầu và ý tưởng đang mở. Chưa có Trang nào: vẫn soạn (đếm chung), người duyệt chọn Trang sau."""
     today = timezone.localtime(now).date() if now else timezone.localdate()
     want = int(getattr(settings, "TEND_MKT_DAILY", 1) or 0)
-    have = Post.objects.filter(for_date=today, origin=Post.Origin.DAILY).count()
     made = []
-    for _ in range(max(0, want - have)):
-        idea = Idea.objects.filter(state=Idea.State.OPEN).order_by("-kind", "created_at").first()   # yêu cầu trước ý tưởng
-        post = draft(today, idea=idea)
-        if post is None:
-            break
-        made.append(post)
+    for channel in list(Channel.objects.filter(active=True, default=True).order_by("name")) or [None]:
+        rows = Post.objects.filter(for_date=today, origin=Post.Origin.DAILY)
+        have = (rows.filter(channels=channel) if channel else rows).count()
+        for _ in range(max(0, want - have)):
+            idea = Idea.objects.filter(state=Idea.State.OPEN).order_by("-kind", "created_at").first()   # yêu cầu trước ý tưởng
+            post = draft(today, idea=idea, channel=channel)
+            if post is None:
+                return made
+            made.append(post)
     return made
 
 
@@ -163,8 +208,7 @@ def revise(post, instruction):
     """Người duyệt nhắn "AI: ngắn hơn…" → chữ mới (giữ quy tắc không tên/địa chỉ/giá). None nếu chưa bật AI hoặc lỗi."""
     if not ai.available() or not instruction:
         return None
-    style = samples(4)
-    system = SYSTEM + ("\n\nCÁC BÀI MẪU GIỌNG VĂN:\n" + "\n---\n".join(style) if style else "")
+    system, _ = system_prompt(post.channels.order_by("name").first() or primary_channel(), 4)
     try:
         response = ai.create_message(model=ai.model(), max_tokens=3000,
                                      system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],

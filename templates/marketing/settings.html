@@ -17,6 +17,10 @@ pages_manage_posts, pages_read_engagement, pages_show_list trên Trang.</p>
 <button class="btn plain" type="submit">Lưu</button></form>
 <form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="check"><input type="hidden" name="id" value="{{ c.pk }}"><button class="btn plain" type="submit">Kiểm tra kết nối</button></form>{% endif %}
 <form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="import"><input type="hidden" name="id" value="{{ c.pk }}"><button class="btn plain" type="submit">Lấy 30 bài cũ làm mẫu giọng văn</button></form>
+<p>{% if c.brief or c.sample_count %}● Trợ lý viết theo {% if c.brief %}giới thiệu Trang{% endif %}{% if c.brief and c.sample_count %} và {% endif %}{% if c.sample_count %}{{ c.sample_count }} bài mẫu của Trang{% endif %}.{% else %}▼ Chưa có giới thiệu và bài mẫu: trợ lý chưa biết thương hiệu, giọng văn của Trang này.{% endif %}</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="brief"><input type="hidden" name="id" value="{{ c.pk }}">
+<label>Giới thiệu Trang cho trợ lý viết bài<textarea name="brief" rows="5" style="width:100%" maxlength="2000" placeholder="Thương hiệu, dịch vụ chính, khách hàng, cách xưng hô, câu kêu gọi (nhắn tin, Zalo…), hashtag cố định, điều cần tránh">{{ c.brief }}</textarea></label>
+<button class="btn plain" type="submit">Lưu giới thiệu</button></form>
 </section>{% endfor %}
 {% if user.is_director %}<details class="box"{% if not channels %} open{% endif %}><summary><b>+ Thêm Trang</b></summary>
 <form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="channel">
@@ -26,8 +30,10 @@ pages_manage_posts, pages_read_engagement, pages_show_list trên Trang.</p>
 <label class="check"><input type="checkbox" name="default" value="1" checked> Mặc định</label><button class="btn" type="submit">Thêm</button></form></details>{% endif %}
 
 <h2>Bài mẫu giọng văn ({{ samples|length }})</h2>
-<p class="muted">Trợ lý viết theo các bài mẫu đang dùng (tối đa 8 bài mới nhất). Lấy bài cũ của Trang bằng nút ở trên, hoặc dán bài anh/chị ưng.</p>
-<form method="post">{% csrf_token %}<input type="hidden" name="action" value="sample"><textarea name="text" rows="5" style="width:100%" placeholder="Dán một bài mẫu"></textarea><button class="btn plain" type="submit">Thêm bài mẫu</button></form>
-<ul>{% for s in samples %}<li>{% if s.active %}●{% else %}○{% endif %} {{ s.get_source_display }} · {{ s.text|truncatechars:160 }}
+<p class="muted">Mỗi Trang có giọng văn riêng: trợ lý viết bài cho Trang nào thì dùng bài mẫu của Trang đó (tối đa 8 bài mới nhất) và bài mẫu dùng chung. Lấy bài cũ của Trang bằng nút ở trên, hoặc dán bài anh/chị ưng.</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="sample">
+{% if channels %}<label>Bài mẫu của Trang <select name="channel">{% for c in channels %}<option value="{{ c.pk }}">{{ c.name }}</option>{% endfor %}<option value="">Dùng chung mọi Trang</option></select></label>{% endif %}
+<textarea name="text" rows="5" style="width:100%" placeholder="Dán một bài mẫu"></textarea><button class="btn plain" type="submit">Thêm bài mẫu</button></form>
+<ul>{% for s in samples %}<li>{% if s.active %}●{% else %}○{% endif %} {{ s.channel.name|default:"Dùng chung" }} · {{ s.get_source_display }} · {{ s.text|truncatechars:160 }}
 <form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="toggle-sample"><input type="hidden" name="id" value="{{ s.pk }}"><button class="btn plain" type="submit">{% if s.active %}Thôi dùng{% else %}Dùng{% endif %}</button></form></li>{% endfor %}</ul>
 {% endblock %}

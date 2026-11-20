@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest import mock
 
+from django.core.exceptions import PermissionDenied
 from django.core.management import call_command
 from django.urls import reverse
 from django.utils import timezone
@@ -164,6 +165,9 @@ class AssetAndDraftTests(MarketingCase):
         self.assertIn(f"mkt-draft:{post.pk}", done)
         self.assertEqual((post.state, post.ai_written, post.items.count()), (Post.State.DRAFT, False, 3))
         self.assertIn("Chưa bật trợ lý AI", post.note)
+        self.assertIn("chưa có giới thiệu và bài mẫu", post.note)                  # nhắc người duyệt điền giọng văn Trang
+        self.assertNotIn("tân cổ điển", post.text.casefold())                         # chữ mẫu không gắn thương hiệu khác
+        self.assertNotIn("#tancodien", post.text)
         self.assertEqual(list(post.channels.all()), [self.channel])
         for user in (self.director, self.mkt):
             chat = self.chats[user.pk]
@@ -187,7 +191,8 @@ class AssetAndDraftTests(MarketingCase):
                                    content=[SimpleNamespace(type="text", text=text)])
         with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "create_message", side_effect=fake_create):
             post = writer.daily()[0]
-        self.assertEqual((post.text, post.ai_written, post.note), ("Phòng khách đang hoàn thiện ✨", True, "Chọn ảnh rõ nhất"))
+        self.assertEqual((post.text, post.ai_written), ("Phòng khách đang hoàn thiện ✨", True))
+        self.assertTrue(post.note.startswith("Chọn ảnh rõ nhất ⚠ Trang \"TenD Công trình\" chưa có giới thiệu"))
         self.assertEqual(captured["output_config"]["format"]["type"], "json_schema")
         self.assertNotIn("tool_choice", captured)
         content = captured["messages"][0]["content"]
@@ -355,6 +360,102 @@ class CommandAndWebTests(MarketingCase):
         self.client.post(reverse("marketing_settings"), {"action": "import", "id": self.channel.pk})
         self.assertEqual(StyleSample.objects.count(), 1)                              # bài trống bỏ, chạy lại không trùng
         self.assertIn("Nội dung", self.client.get(reverse("overview")).content.decode())
+
+
+class PageVoiceTests(MarketingCase):
+    """Mỗi Trang một thương hiệu, một giọng văn: trợ lý viết theo giới thiệu + bài mẫu của đúng Trang sẽ đăng."""
+
+    @staticmethod
+    def ai_reply(captured, payload):
+        def fake_create(**kwargs):
+            captured.append(kwargs)
+            return SimpleNamespace(stop_reason="end_turn", usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+                                   content=[SimpleNamespace(type="text", text=json.dumps(payload))])
+        return fake_create
+
+    def uploads(self, count):
+        for i in range(count):
+            MarketingCase.shots += 1
+            assets.add_upload(self.mkt, self.colored(f"up{MarketingCase.shots}"), f"up{i}.jpg", None, "ảnh công trình")
+
+    def test_writer_uses_brief_and_samples_of_target_page_only(self):
+        roma = services.save_channel(self.director, name="New Roma classic", page="newromaclassic", default=False)
+        with self.assertRaises(PermissionDenied):
+            services.set_brief(self.site, self.channel, "không được sửa")
+        services.set_brief(self.mkt, self.channel, "TenD – hoàn thiện nhà trọn gói. Xưng TenD, gọi khách anh chị.\n"
+                                                   "Hashtag: #TenD #HoanThienNhaTronGoi")
+        self.assertTrue(AuditLog.objects.filter(reason="Sửa giới thiệu Trang").exists())
+        services.add_sample(self.mkt, "TenD bàn giao phần thô tầng 3, chuẩn bị trát. Anh chị nhắn TenD để được tư vấn trọn gói!",
+                            channel_row=self.channel)
+        services.add_sample(self.mkt, "New Roma classic: phòng khách tân cổ điển, phào chỉ dát vàng sang trọng quý phái.",
+                            channel_row=roma)
+        self.uploads(2)
+        captured = []
+        payload = {"photos": [0], "text": "TenD hoàn thiện tường tầng 4 ✨ #TenD", "note": "Ảnh rõ"}
+        with mock.patch.object(ai, "available", return_value=True), \
+                mock.patch.object(ai, "create_message", side_effect=self.ai_reply(captured, payload)):
+            post = writer.daily()[0]
+        system = captured[0]["system"][0]["text"]
+        self.assertIn('Trang Facebook "TenD Công trình"', system)
+        self.assertIn("hoàn thiện nhà trọn gói", system)
+        self.assertIn("TenD bàn giao phần thô", system)
+        self.assertNotIn("New Roma", system)                                          # không lẫn giọng Trang khác
+        self.assertNotIn("tân cổ điển", system.casefold())
+        self.assertEqual((list(post.channels.all()), post.note), ([self.channel], "Ảnh rõ"))
+        captured.clear()                                                              # sửa theo ý cũng dùng giọng Trang của bài
+        with mock.patch.object(ai, "available", return_value=True), \
+                mock.patch.object(ai, "create_message", side_effect=self.ai_reply(captured, {"text": "Bài sửa"})):
+            self.assertEqual(writer.revise(post, "ngắn hơn"), "Bài sửa")
+        self.assertIn("hoàn thiện nhà trọn gói", captured[0]["system"][0]["text"])
+        self.client.force_login(self.mkt)                                             # sửa giới thiệu trên web
+        page = self.client.post(reverse("marketing_settings"), {"action": "brief", "id": roma.pk,
+                                                                "brief": "New Roma – nội thất tân cổ điển"}, follow=True)
+        self.assertContains(page, "Đã lưu giới thiệu Trang")
+        roma.refresh_from_db()
+        self.assertEqual(roma.brief, "New Roma – nội thất tân cổ điển")
+        self.client.post(reverse("marketing_settings"), {"action": "sample", "channel": roma.pk,
+                                                         "text": "Mẫu thứ hai của New Roma, câu đủ dài để làm bài mẫu giọng văn."})
+        self.assertEqual(StyleSample.objects.filter(channel=roma).count(), 2)
+
+    def test_daily_one_post_per_default_page(self):
+        second = services.save_channel(self.director, name="TenD xây nhà", page="tendxaynha")
+        self.uploads(8)
+        made = writer.daily()
+        self.assertEqual(sorted([c.pk for c in p.channels.all()] for p in made), sorted([[self.channel.pk], [second.pk]]))
+        self.assertTrue(all("Trang \"" in p.note for p in made))
+        self.assertEqual(writer.daily(), [])                                          # đủ bài hôm nay cho mỗi Trang
+
+    def reply(self, user, text, quoted):
+        msg = {"message_id": 900, "chat": {"id": int(self.chats[user.pk]), "type": "private"},
+               "from": {"id": user.pk + 9000, "first_name": user.username}, "text": text,
+               "reply_to_message": {"message_id": 5, "from": {"id": 1, "is_bot": True}, "text": quoted}}
+        from chat import bot as chat_bot
+        chat_bot.handle_update({"update_id": next(self.update_id), "message": msg})
+
+    def test_reply_to_draft_asks_assistant_to_revise_that_post(self):
+        post = self.ready_post(2)
+        proposals = Proposal.objects.count()
+        quoted = PREFIX_ANCHOR(post)
+        old_sha = post.package_sha
+        self.reply(self.director, "bỏ ngày, ghi chung là công trình đang hoàn thiện", quoted)
+        self.assertIn("chưa sửa bài", self.texts(self.chats[self.director.pk])[-1])     # chưa bật AI: chỉ cách khác, không giả
+        captured = []
+        with mock.patch.object(ai, "available", return_value=True), \
+                mock.patch.object(ai, "create_message", side_effect=self.ai_reply(captured, {"text": "Bài đã sửa theo ý"})):
+            self.reply(self.director, "bỏ ngày, ghi chung là công trình đang hoàn thiện", quoted)
+        post.refresh_from_db()
+        self.assertEqual(post.text, "Bài đã sửa theo ý")
+        self.assertNotEqual(post.package_sha, old_sha)                                # bản mới: phải duyệt lại
+        self.assertIn("bỏ ngày", captured[0]["messages"][0]["content"])
+        self.assertIn(f"BÀI NHÁP #{post.pk}", self.texts(self.chats[self.director.pk])[-1])
+        self.reply(self.site, "sửa giúp", quoted)
+        self.assertIn("Giám đốc và nhân viên Marketing", self.texts(self.chats[self.site.pk])[-1])
+        self.assertEqual(Proposal.objects.count(), proposals)                       # không thành phiếu báo cáo
+
+
+def PREFIX_ANCHOR(post):
+    from .bot import PREFIX, anchor_text
+    return PREFIX + anchor_text(post)
 
 
 class SecretTests(MarketingCase):

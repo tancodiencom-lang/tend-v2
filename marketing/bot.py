@@ -21,7 +21,9 @@ from .models import Channel, Idea, Post, PostTarget
 PREFIX = "📣 Nội dung: "
 COMMANDS = ("/ytuong", "/baiviet", "/noidung")
 HELP = ("• Nội dung số (Giám đốc, Marketing): /baiviet [TN-22] <yêu cầu> — trợ lý soạn bài ngay (gửi ảnh trước nếu có); "
-        "/ytuong <ý tưởng> — để dành cho bài hằng ngày; /noidung — bài chờ duyệt, /noidung 12 — xem lại bài #12.")
+        "/ytuong <ý tưởng> — để dành cho bài hằng ngày; /noidung — bài chờ duyệt, /noidung 12 — xem lại bài #12; "
+        "trả lời (reply) vào tin BÀI NHÁP kèm ý muốn sửa để trợ lý sửa bài đó.")
+PREVIEW = re.compile(r"BÀI NHÁP #(\d+)")
 
 
 def reviewers():
@@ -42,7 +44,8 @@ def anchor_text(post):
              f"Ảnh: {items} (ảnh 1 hiện đầu tiên; Facebook có thể tự sắp bố cục khác)" if items else "Bài không có ảnh."]
     if post.note:
         lines.append(f"Ghi chú trợ lý: {post.note}")
-    lines.append("Bấm ✓ Duyệt và đăng khi chữ, ảnh, thứ tự và Trang đều đúng. Sửa chữ/đổi ảnh xong bot gửi lại bản mới.")
+    lines.append("Bấm ✓ Duyệt và đăng khi chữ, ảnh, thứ tự và Trang đều đúng. Muốn sửa: trả lời (reply) tin này kèm ý muốn sửa "
+                 "để trợ lý sửa, hoặc bấm ✍ Sửa chữ để thay nguyên văn. Sửa/đổi ảnh xong bot gửi lại bản mới.")
     return "\n".join(lines)
 
 
@@ -162,6 +165,30 @@ def edit_text(link_row, post_id, text):
             if text is None:
                 return "Trợ lý AI chưa bật hoặc đang lỗi: nhắn chữ mới (thay nguyên văn)."
         post = services.set_text(link_row.user, post, text)
+    except (PermissionDenied, ValidationError) as error:
+        return "; ".join(getattr(error, "messages", [str(error)]))
+    send_preview(post, [link_row])
+    return None
+
+
+def reply_edit(link_row, post_id, text):
+    """Trả lời (reply) vào tin BÀI NHÁP = nhờ trợ lý sửa bài đó theo ý (như "AI: …" sau ✍ Sửa chữ)."""
+    if not link_row.user.does_marketing:
+        return "Sửa bài đăng dành cho Giám đốc và nhân viên Marketing."
+    post = _post(post_id)
+    if post is None:
+        return "Không tìm thấy bài."
+    instruction = text.strip()
+    if instruction.casefold().startswith("ai:"):
+        instruction = instruction[3:].strip()
+    if post.state not in services.EDITABLE:
+        return f"Bài #{post.pk} đang ở trạng thái \"{post.get_state_display().lower()}\", không sửa được."
+    new_text = writer.revise(post, instruction)
+    if new_text is None:
+        return (f"Trợ lý AI chưa bật hoặc đang lỗi nên chưa sửa bài #{post.pk} theo ý được. Bấm ✍ Sửa chữ trên bản duyệt "
+                "rồi nhắn nguyên văn chữ mới.")
+    try:
+        post = services.set_text(link_row.user, post, new_text)
     except (PermissionDenied, ValidationError) as error:
         return "; ".join(getattr(error, "messages", [str(error)]))
     send_preview(post, [link_row])
