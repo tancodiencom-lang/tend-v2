@@ -25,8 +25,9 @@ from .models import ChatLink, Group
 PREFIX = "🤖 Trợ lý: "
 INTRO = ("Chào cả nhà, em là trợ lý Tend. Giám đốc nhắn /nhom <mã công trình> (vd /nhom TN-22) hoặc /nhom chung để em làm "
          "việc trong nhóm này.\n• Mỗi người cần kết nối Tend riêng với em trước (app.tend.vn › Tài khoản › Kết nối Telegram).\n"
-         "• Gọi em bằng @{bot} hoặc trả lời tin của em. Báo cáo, phiếu em gửi RIÊNG người nhắn để xác nhận; trong nhóm em "
-         "không nói số tiền.\n• Câu khó em hỏi Giám đốc rồi trả lời lại trong nhóm.")
+         "• Gọi em bằng @{bot} hoặc trả lời tin của em. Báo cáo mở đầu kèm ngày (vd \"Báo cáo ngày 20/11\" hoặc \"Công việc ngày "
+         "20/11\") em lập phiếu gửi RIÊNG người nhắn xác nhận, xác nhận xong em đăng tóm tắt vào nhóm; trong nhóm em không nói số "
+         "tiền. Cuối ngày 18:30 em gửi tóm tắt công trình vào nhóm.\n• Câu khó em hỏi Giám đốc rồi trả lời lại trong nhóm.")
 
 
 def _bot():
@@ -48,7 +49,8 @@ def addressed(message, text):
         if bot and command.group(2).casefold() != bot.casefold():
             return False, ""                  # lệnh gửi cho bot khác trong nhóm
         text = command.group(1) + text[command.end():]
-    return called, " ".join(text.split())
+    # Giữ xuống dòng (báo cáo nhiều dòng: việc, nhân sự, dự kiến), chỉ gọn khoảng trắng trong từng dòng
+    return called, "\n".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
 
 
 def _once(key):
@@ -85,8 +87,9 @@ def link_group(link_row, chat, arg):
     group.active, group.linked_by, group.linked_at = True, link_row.user, timezone.now()
     record_save(group, link_row.user, "Gắn nhóm Telegram", channel="telegram")
     where = f"công trình {group.project.code}" if group.project_id else "nhóm chung (không gắn công trình)"
-    return (f"Đã gắn nhóm với {where}. Em nghe tin báo cáo trong nhóm và gửi phiếu riêng người nhắn xác nhận; gọi em bằng "
-            f"@{_bot()}. Tắt nghe tin: /nhom khongnghe.")
+    return (f"Đã gắn nhóm với {where}. Báo cáo trong nhóm mở đầu kèm ngày (vd \"Báo cáo ngày {timezone.localdate():%d/%m}\") "
+            f"em lập phiếu gửi riêng người nhắn xác nhận, xác nhận xong em đăng tóm tắt vào nhóm; gọi em bằng @{_bot()}. "
+            "Tắt nghe tin: /nhom khongnghe.")
 
 
 def on_member(update):

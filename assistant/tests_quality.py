@@ -312,16 +312,74 @@ class GroupFreeReportTests(BotCase):
         with self.captureOnCommitCallbacks(execute=True):
             bot.handle_update({"update_id": next(self.update_id), "message": msg})
 
-    def test_listening_group_needs_report_heading_and_uses_group_project(self):
+    def group_texts(self):
+        from chat.tests_group import GROUP
+        return [d["text"] for m, d in self.sent if m == "sendMessage" and str(d["chat_id"]) == str(GROUP)]
+
+    def test_listening_group_needs_dated_heading_and_uses_group_project(self):
         other = Project.objects.create(code="HB-01", name="Hà Bắc")
         Member.objects.create(project=other, user=self.site)
         self.say(self.director, "/nhom TN-22")
         self.say(self.site, "Mọi người nhớ:\n+ mang đồ bảo hộ\n+ dọn vệ sinh cuối ngày")         # dặn dò: im lặng
+        self.say(self.site, "anh ơi xi măng hết rồi")
         self.assertFalse(Proposal.objects.exists())
-        self.say(self.site, "Báo cáo hôm nay\n+ Cắt đục sàn bê tông sàn mái")                     # không ghi mã công trình
+        self.say(self.site, "Báo cáo hôm nay\n+ Cắt đục sàn bê tông sàn mái")                     # thiếu ngày: chưa lập phiếu
+        self.assertFalse(Proposal.objects.exists())
+        hint = self.texts(self.chats[self.site.pk])[-1]
+        self.assertIn("chưa ghi ngày", hint)
+        self.assertIn(f"Báo cáo ngày {timezone.localdate():%d/%m}", hint)
+        self.say(self.site, "Báo cáo chiều\n+ Trát wc tầng 5")
+        self.assertEqual(sum("chưa ghi ngày" in t for t in self.texts(self.chats[self.site.pk])), 1)   # nhắc một lần mỗi ngày
+        self.say(self.site, f"Công việc ngày {timezone.localdate():%d/%m}\n+ Cắt đục sàn bê tông sàn mái")
         proposal = self.proposal()
         self.assertEqual((proposal.project, proposal.link.user), (self.project, self.site))     # công trình của nhóm
         self.assertEqual(proposal.payload["extra"][0]["floor"], "Mái")
+        self.assertTrue(parse.DATED_HEAD.match("Báo cáo cv 19/11 - Nhân sự"))                    # mẫu giám sát đang nhắn
+        self.assertTrue(parse.DATED_HEAD.match("Báo cáo TN-22 ngày 19/11"))
+        self.assertFalse(parse.DATED_HEAD.match("Báo cáo hôm nay"))
+
+    def test_confirmed_report_posted_to_project_group_without_money_or_score(self):
+        self.say(self.director, "/nhom TN-22")
+        self.sent.clear()
+        self.say(self.site, f"Báo cáo ngày {timezone.localdate():%d/%m}\nTN-22 T1.2 40%\n+ Cắt đục sàn mái\n"
+                            "Nhân sự: tổ điện (chủ nhà) 2 người\nCông: Nam")
+        proposal = self.proposal()
+        self.assertIn("gửi riêng", self.group_texts()[-1])
+        with self.captureOnCommitCallbacks(execute=True):
+            self.press(self.site, f"ok:{proposal.pk}")
+        posted = self.group_texts()[-1]
+        self.assertIn(f"✓ ĐÃ GHI BÁO CÁO TN-22 · ngày {timezone.localdate():%d/%m} · Minh", posted)
+        self.assertIn("Tiến độ: T1.2 40%", posted)
+        self.assertIn("Việc ngoài bản vẽ: Cắt đục sàn mái", posted)
+        self.assertIn("tổ điện (của chủ nhà, tổ mới): 2 người", posted)
+        for hidden in ("₫", "Mức đầy đủ", "/100"):
+            self.assertNotIn(hidden, posted)
+        self.assertIn("Mức đầy đủ", self.texts(self.chats[self.director.pk])[-1])            # Giám đốc vẫn nhận tin riêng có điểm
+
+    def test_evening_summary_sent_to_each_project_group_once(self):
+        from django.test import override_settings
+        self.say(self.director, "/nhom TN-22")
+        self.message(self.site, f"TN-22 T1.2 40%\n+ Cắt đục sàn mái\nthợ xây 3 thợ 2 phụ\n"
+                                f"Dự kiến {timezone.localdate() + timedelta(days=1):%d/%m}: trát tường tầng 4")
+        proposal = self.proposal()
+        self.press(self.site, f"tm:{str(proposal.pk)[:8]}:0:k")
+        self.press(self.site, f"ok:{proposal.pk}")
+        self.sent.clear()
+        with override_settings(TEND_WORK_DAYS="1,2,3,4,5,6,7"):
+            done = schedule.run(at(timezone.localdate(), 18, 35))
+            again = schedule.run(at(timezone.localdate(), 18, 50))
+        self.assertTrue(any(k.startswith("evening-group:") for k in done))
+        self.assertFalse(any(k.startswith("evening-group:") for k in again))                 # không gửi trùng
+        summary = [t for t in self.group_texts() if "TÓM TẮT NGÀY" in t]
+        self.assertEqual(len(summary), 1)
+        text = summary[0]
+        self.assertIn("· TN-22", text)
+        self.assertIn("Đã làm: T1.2 40%", text)
+        self.assertIn("tổ khoán 5 người", text)
+        self.assertIn("Việc ngoài bản vẽ: Mái: Cắt đục sàn mái", text)
+        self.assertIn("trát tường tầng 4", text)
+        self.assertNotIn("₫", text)
+        self.assertTrue(any("TÓM TẮT NGÀY" in t for t in self.texts(self.chats[self.director.pk])))   # Giám đốc bản riêng
 
 
 class TeamAndTimesheetTests(BotCase):

@@ -21,7 +21,7 @@ from django.utils import timezone
 from asks import services as asks
 from asks.models import Ask
 from chat import money_bot, telegram
-from chat.models import ChatLink, Proposal
+from chat.models import ChatLink, Group, Proposal
 from core.models import Role, User
 from core.text import vn_number, vnd
 from field import crews as crew_lookup
@@ -260,32 +260,42 @@ def personal_text(user, now, found=None):
     return f"VIỆC HÔM NAY {today:%d/%m/%Y}\n" + "\n".join(out) + "\nXong việc nào nhắn /xong #số [ghi chú]. Vướng gì nhắn lại ngay."
 
 
+def _progress_state(project, today):
+    p = compute.progress(project, today)
+    p.pop("rows", None)
+    gap = (f", {'▲ nhanh' if p['gap'] >= 0 else '▼ chậm'} {vn_number(abs(p['gap']))}% so kế hoạch" if p.get("gap") is not None else "")
+    return f"{vn_number(p['actual'])}%{gap}" if p.get("actual") is not None else p.get("missing") or "chưa tính được %"
+
+
+def _headcount(project, today):
+    """", tổ khoán 5 người, tổ chủ nhà 2 người" theo số người tổ báo hôm nay (báo cáo mới nhất mỗi tổ)."""
+    crews = crew_lookup.for_days([project], today, today)
+    team = sum(c.total for c in crews if c.team_id and c.team.kind == Team.Kind.CONTRACT)
+    owner = sum(c.total for c in crews if c.team_id and c.team.kind == Team.Kind.OWNER)
+    unknown = sum(c.total for c in crews if not c.team_id)
+    return "".join([f", tổ khoán {team} người" if team else "", f", tổ chủ nhà {owner} người" if owner else "",
+                    f", {unknown} người chưa rõ tổ" if unknown else ""])
+
+
+def _plan_check(project, today, indent="  "):
+    planned = plans.compare(project, today)
+    left = [plans.label(r) for r in planned if not r["done"]]
+    if left:
+        return [f"{indent}● Dự kiến hôm nay mà chưa thấy làm ({len(left)}/{len(planned)}): " + "; ".join(left[:8])]
+    return [f"{indent}✓ Đã làm đủ {len(planned)} việc dự kiến hôm nay."] if planned else []
+
+
 def evening_text(user, now):
     today = timezone.localtime(now).date()
     out = [f"TÓM TẮT NGÀY {today:%d/%m/%Y}"]
     for project in running_projects(today):
-        p = compute.progress(project, today)
-        p.pop("rows", None)
         reports = Report.objects.filter(project=project, work_date=today).count()
         people = sum((a.days for a in Attendance.objects.filter(project=project, work_date=today)), Decimal(0))
-        gap = (f", {'▲ nhanh' if p['gap'] >= 0 else '▼ chậm'} {vn_number(abs(p['gap']))}% so kế hoạch" if p.get("gap") is not None else "")
-        state = f"{vn_number(p['actual'])}%{gap}" if p.get("actual") is not None else p.get("missing") or "chưa tính được %"
         extra = ExtraWork.objects.filter(report__project=project, report__work_date=today).count()
-        crews = crew_lookup.for_days([project], today, today)
-        team = sum(c.total for c in crews if c.team_id and c.team.kind == Team.Kind.CONTRACT)
-        owner = sum(c.total for c in crews if c.team_id and c.team.kind == Team.Kind.OWNER)
-        unknown = sum(c.total for c in crews if not c.team_id)
-        headcount = "".join([f", tổ khoán {team} người" if team else "", f", tổ chủ nhà {owner} người" if owner else "",
-                             f", {unknown} người chưa rõ tổ" if unknown else ""])
-        report = (f"{reports} báo cáo, {vn_number(people)} công có tên" + headcount + (f", {extra} việc ngoài bản vẽ" if extra else "")
-                  if reports else "● CHƯA CÓ BÁO CÁO")
-        out.append(f"• {project.code}: {state}; hôm nay {report}")
-        planned = plans.compare(project, today)
-        left = [plans.label(r) for r in planned if not r["done"]]
-        if left:
-            out.append(f"  ● Dự kiến hôm nay mà chưa thấy làm ({len(left)}/{len(planned)}): " + "; ".join(left[:8]))
-        elif planned:
-            out.append(f"  ✓ Đã làm đủ {len(planned)} việc dự kiến hôm nay.")
+        report = (f"{reports} báo cáo, {vn_number(people)} công có tên" + _headcount(project, today)
+                  + (f", {extra} việc ngoài bản vẽ" if extra else "") if reports else "● CHƯA CÓ BÁO CÁO")
+        out.append(f"• {project.code}: {_progress_state(project, today)}; hôm nay {report}")
+        out += _plan_check(project, today)
     if len(out) == 1:
         out.append("• Không có công trình đang thi công.")
     money = money_bot.daily_text(user, today)
@@ -295,6 +305,46 @@ def evening_text(user, now):
     late = open_.filter(state=Task.State.OPEN, due__lt=now).count()
     out.append(f"\nViệc giao còn mở: {open_.count()}" + (f", trễ {late}" if late else "") + f" · {settings.APP_URL}/tro-ly/")
     return "\n".join(out)
+
+
+def group_evening_text(project, now):
+    """Tóm tắt 18:30 cho nhóm Telegram của một công trình (chủ dự án chốt 20/11/2026): không có tiền, không có điểm báo cáo."""
+    today = timezone.localtime(now).date()
+    out = [f"TÓM TẮT NGÀY {today:%d/%m/%Y} · {project.code}", f"Tiến độ: {_progress_state(project, today)}"]
+    reports = list(Report.objects.filter(project=project, work_date=today).select_related("author")
+                   .prefetch_related("lines__item", "extra_work").order_by("created_at"))
+    if not reports:
+        out.append("● Hôm nay CHƯA CÓ BÁO CÁO.")
+    else:
+        out.append(f"Báo cáo: {len(reports)} ({', '.join(dict.fromkeys(str(r.author) for r in reports))})")
+        done = [f"{l.item.code} {vn_number(l.percent)}%" if l.percent is not None else f"{l.item.code} {vn_number(l.quantity)} {l.item.unit}"
+                for r in reports for l in r.lines.all()]
+        if done:
+            out.append("Đã làm: " + ", ".join(done[:20]))
+        extra = [str(e) for r in reports for e in r.extra_work.all()]
+        if extra:
+            out.append("Việc ngoài bản vẽ: " + "; ".join(extra[:12]))
+        people = sum((a.days for a in Attendance.objects.filter(project=project, work_date=today, worker__isnull=False)), Decimal(0))
+        out.append(f"Nhân sự: {vn_number(people)} công có tên" + _headcount(project, today))
+    out += _plan_check(project, today, "")
+    tomorrow = plans.next_workday(today)
+    upcoming = plans.planned(project, tomorrow)
+    if upcoming:
+        out.append(f"Kế hoạch {tomorrow:%d/%m}: " + "; ".join(plans.label({"floor": r.floor, "text": r.description})
+                                                          for r in upcoming[:10]))
+    out.append(f"Xem: {settings.APP_URL}/ban-ve/{project.code}/")
+    return "\n".join(out)
+
+
+def send_group(key, group, text, now=None):
+    """Gửi vào nhóm Telegram một lần cho mỗi khoá (chạy lịch nhiều lần không gửi trùng)."""
+    try:
+        with transaction.atomic():
+            Notice.objects.create(key=key[:120], text=text[:4000], sent_at=now or timezone.now())
+    except IntegrityError:
+        return False
+    telegram.send(group.chat_id, PREFIX + text)
+    return True
 
 
 # ---------- chạy ----------
@@ -354,6 +404,11 @@ def run(now=None):
     if window(local, 18, 30):
         for user in directors():
             go(f"evening:{stamp}:{user.pk}", user, evening_text(user, now))
+        if is_workday(local) and local.time() < time(21, 0):
+            for group in Group.objects.filter(active=True, project__active=True).select_related("project"):
+                key = f"evening-group:{stamp}:{group.pk}"
+                if not sent(key) and send_group(key, group, group_evening_text(group.project, now), now):
+                    done.append(key)
 
     for task in Task.objects.filter(state=Task.State.OPEN).select_related("owner", "project"):
         if not task.accepted_at and now - task.created_at >= ESCALATE_AFTER:

@@ -35,9 +35,15 @@ DATE_IN = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})(?:/(\d{4}))?(?![\d/])")
 #   + Đánh lạnh phòng ngoài tầng 5.
 # → việc không mã thành "việc ngoài bản vẽ" (không tính % tiến độ), phần "dự kiến" thành kế hoạch ngày đó (không phải việc
 # đã làm), "3 thợ 2 phụ" ghi lại làm nhân sự theo tin (không tên nên không tính công).
-SEGMENT = re.compile(r"\n|\s[-–]\s|[+•;]|(?<=\.)\s+(?=[A-ZÀ-Ỹ])")
+SEGMENT = re.compile(r"\n|\s[-–]\s|[+•;]|(?<=\.)\s+(?=[A-ZÀ-Ỹ])"
+                     r"|\s(?=(?:nhân sự|nhan su|nhân công|nhan cong|nhân lực|nhan luc)\s*:)", re.I)
 BULLETED = re.compile(r"(?:^|\n)\s*[-+•*]|\s\+\s|\s[-–]\s|\n")
 REPORT_HEAD = re.compile(r"^\s*(?:báo cáo|bao cao|bc|cv|công việc|cong viec|tiến độ|tien do)(?!\w)", re.I)
+# Trong nhóm (chủ dự án chốt 20/11/2026): tin thành phiếu khi mở đầu "Báo cáo ngày 20/11", "Công việc ngày 20/11" (hoặc
+# "Báo cáo cv 19/11", "Báo cáo TN-22 ngày 19/11") — tiêu đề kèm ngày tháng; hoặc cú pháp ngắn có mã chi tiết + %.
+DATED_HEAD = re.compile(r"^\s*(?:báo cáo|bao cao|bc|công việc|cong viec|cv)(?:\s+(?:ngày|ngay|cv|công việc|cong viec|hôm nay|"
+                        r"hom nay|tiến độ|tien do|[A-Za-z]{1,4}-\d{1,4}))*\s*[:\-–]?\s*(?:ngày|ngay)?\s*\d{1,2}/\d{1,2}(?![\d/])"
+                        r"|^\s*(?:báo cáo|bao cao|bc|công việc|cong viec|cv)\s+(?:ngày|ngay)\s+\d{1,2}/\d{1,2}/\d{4}", re.I)
 PLAN_START = re.compile(r"(?<!\w)(?:(?:cv|công việc|cong viec|việc|viec)\s+)?(?:dự kiến|du kien)"
                         r"(?:\s+(?:làm|lam))?(?:\s+(?:ngày mai|ngay mai|mai))?(?!\w)"
                         r"|(?:^|\n|\s[-–]\s|[+•])\s*(?:kế hoạch|ke hoach|việc ngày mai|viec ngay mai|ngày mai|ngay mai)(?!\w)", re.I)
@@ -299,7 +305,8 @@ def sections(text, line_re=LINE):
 def report(text, projects, today=None, codes=None, strict=False):
     """Tin báo cáo → {project_code, lines, people, extra, plan, crews, work_date, unread, free, note} hoặc None.
     `codes(project)`: mã chi tiết đang dùng của công trình (để đọc mã không có dấu chấm như D179).
-    `strict` (nghe tin trong nhóm): tin gạch đầu dòng chỉ là báo cáo khi mở đầu "Báo cáo…/Công việc…" hoặc có mã chi tiết.
+    `strict` (nghe tin trong nhóm): chỉ là báo cáo khi mở đầu "Báo cáo ngày 20/11…/Công việc ngày 20/11…" (tiêu đề + ngày)
+    hoặc có mã chi tiết kèm %.
     Không có mã công trình mà người gửi có nhiều công trình: trả {needs_project: True} để bot hỏi."""
     project = find_project(text, projects)
     code = project.code if project else None
@@ -353,7 +360,7 @@ def report(text, projects, today=None, codes=None, strict=False):
     crews = merge_crews(crews)
     if not lines and not who and not extra and not planned and not crews:
         return None
-    if strict and not lines and not REPORT_HEAD.match(text):
+    if strict and not lines and not DATED_HEAD.match(text):
         return None
     if project is None:
         return {"needs_project": True} if (free or lines) else None

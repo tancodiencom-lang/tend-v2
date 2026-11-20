@@ -931,6 +931,7 @@ def decide(link_row, proposal_id, confirm):
         report = Report.objects.get(pk=result["report"])
         score = quality.of(report)
         transaction.on_commit(lambda: notify_directors(proposal, user, report, score))
+        transaction.on_commit(lambda: post_to_groups(proposal, user, report))
         if score is not None:
             done += f"\nMức đầy đủ báo cáo: {score.text()}."
             if score.total < quality.GOOD:
@@ -938,7 +939,8 @@ def decide(link_row, proposal_id, confirm):
     return done
 
 
-def notify_directors(proposal, author, report=None, score=None):
+def report_lines(proposal, report=None):
+    """Nội dung báo cáo đã ghi, không có tiền, không có điểm: tiến độ, việc ngoài bản vẽ, nhân sự, so kế hoạch, kế hoạch."""
     p = proposal.payload
     lines = ", ".join(f"{l['code']} " + (f"{vn_number(Decimal(str(l['percent'])))}%" if l.get("percent") is not None
                                           else f"{vn_number(Decimal(str(l['quantity'])))} {l['unit']}") for l in p.get("lines") or [])
@@ -947,21 +949,43 @@ def notify_directors(proposal, author, report=None, score=None):
     compared = plans.compare(proposal.project, field._work_date(p["work_date"])) if report is not None else []
     left = [plans.label(r) for r in compared if not r["done"]]
     plan = p.get("plan")
-    text = "\n".join(filter(None, [
-        f"BÁO CÁO {proposal.project.code} · {author} · {_day(p['work_date'])}",
+    return [
         f"Tiến độ: {lines}" if lines else "",
         f"Việc ngoài bản vẽ: {extra}" if extra else "",
         f"Chấm công: giám sát + {len(people)} người có tên",
         ("Số người theo tổ: " + "; ".join(crew_line(c) for c in p.get("crews") or [])) if p.get("crews") else "",
         (f"So kế hoạch {_day(p['work_date'])}: {len(compared) - len(left)}/{len(compared)} việc đã làm"
          + (f"; chưa thấy: {'; '.join(left[:6])}" if left else "")) if compared else "",
-        (f"Kế hoạch {_day(plan['date'])}: " + "; ".join(row["description"] for row in plan["lines"][:8])) if plan else "",
+        (f"Kế hoạch {_day(plan['date'])}: " + "; ".join(row["description"] for row in plan["lines"][:8])) if plan else ""]
+
+
+def notify_directors(proposal, author, report=None, score=None):
+    p = proposal.payload
+    text = "\n".join(filter(None, [
+        f"BÁO CÁO {proposal.project.code} · {author} · {_day(p['work_date'])}", *report_lines(proposal, report),
         f"Mức đầy đủ: {score.text()}" if score is not None else "",
         f"Ghi chú: {p['note'][:300]}" if p.get("note") else "",
         f"Xem: {settings.APP_URL}/ban-ve/{proposal.project.code}/"]))
     for row in ChatLink.objects.filter(active=True, user__is_active=True).exclude(user=author).select_related("user"):
         if row.user.is_director:
             telegram.send(row.chat_id, text)
+
+
+def post_to_groups(proposal, author, report=None):
+    """Báo cáo đã xác nhận → đăng vào các nhóm Telegram của công trình (chủ dự án chốt 20/11/2026: như nhóm Zalo, mọi
+    người cùng thấy). Không có tiền, không có điểm báo cáo, không có ghi chú gốc."""
+    from .models import Group
+    groups = list(Group.objects.filter(active=True, project=proposal.project))
+    if not groups:
+        return
+    p = proposal.payload
+    photos = proposal.photos.count()
+    text = "\n".join(filter(None, [
+        f"✓ ĐÃ GHI BÁO CÁO {proposal.project.code} · ngày {_day(p['work_date'])} · {author}", *report_lines(proposal, report),
+        f"Ảnh: {photos}" if photos else "",
+        f"Xem bản vẽ: {settings.APP_URL}/ban-ve/{proposal.project.code}/"]))
+    for group in groups:
+        telegram.send(group.chat_id, group_bot.PREFIX + text)
 
 
 def notify_ask(ask):
@@ -1063,6 +1087,9 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
         task_bot.escalate(user, question, reply_chat, where, message_id, project, draft)
         return "Dạ em ghi nhận, em hỏi Giám đốc và trả lời lại ở đây."
 
+    if passive and not _group_report_like(text, user, project):
+        _date_hint(link_row, text)
+        return None, None
     if ai.available():
         photos = _unassigned_photos(link_row)
         images = []
@@ -1130,6 +1157,28 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
             "\"TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ\" (kèm ảnh).\n"
             "/trogiup để xem lệnh; /hoi <câu hỏi> để hỏi Giám đốc."
             + "".join(f"\nTra mã chi tiết {p.code}: {settings.APP_URL}/ban-ve/{p.code}/khoi-luong/" for p in reads.projects(user)[:3])), None
+
+
+def _group_report_like(text, user, project):
+    """Nghe tin trong nhóm: chỉ xử lý tin mở đầu "Báo cáo ngày 20/11"/"Công việc ngày 20/11", cú pháp ngắn có mã chi tiết + %,
+    hoặc phiếu thu chi cú pháp ngắn. Chuyện trao đổi thường bỏ qua (không gọi AI, không tốn chi phí)."""
+    if parse.DATED_HEAD.match(text):
+        return True
+    known = item_codes(project) if project is not None else []
+    if parse.line_pattern(list(known)).search(text):
+        return True
+    return bool(parse.money(text, reads.projects(user)))
+
+
+def _date_hint(link_row, text):
+    """Tin trong nhóm mở đầu "Báo cáo…" mà thiếu ngày: nhắn riêng hướng dẫn, mỗi người một lần mỗi ngày."""
+    today = timezone.localdate().isoformat()
+    if not parse.REPORT_HEAD.match(text) or (link_row.state or {}).get("date_hint") == today:
+        return
+    _state(link_row, date_hint=today)
+    telegram.send(link_row.chat_id, "Tin \"" + text[:60] + "…\" trong nhóm chưa ghi ngày nên bot chưa lập phiếu. Báo cáo trong nhóm "
+                  f"mở đầu kèm ngày, vd \"Báo cáo ngày {timezone.localdate():%d/%m}\" hoặc \"Công việc ngày "
+                  f"{timezone.localdate():%d/%m}\", rồi các dòng + việc đã làm, nhân sự theo tổ, dự kiến mai.")
 
 
 def ask_project(link_row, text, projects):
