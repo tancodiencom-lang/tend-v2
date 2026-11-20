@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}Sổ tài khoản{% endblock %}
+{% block content %}
+<p><a href="{% url 'assistant' %}">‹ Trợ lý</a></p>
+<h1>Sổ tài khoản (trợ lý IT)</h1>
+<p class="muted"><b>Không ghi mật khẩu, khoá ở đây và không gửi qua chat.</b> Mật khẩu lưu trong Bitwarden; sổ này ghi tài khoản nào, ai giữ, dùng ở
+đâu, đã bật xác thực 2 lớp chưa, hạn, lần đổi khoá. Trợ lý nhắc trong bản tin sáng khi sắp hết hạn hoặc quá hạn đổi. Tin nhắn có mật khẩu/khoá gửi
+cho bot sẽ bị xoá ngay và nhắc đổi khoá.</p>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+{% for item in rows %}{% with a=item.row s=item.status %}<details class="box"><summary><b>{{ a.name }}</b> · {{ a.get_kind_display }} · {{ s.1 }}{% if s.2 %} — {{ s.2|join:"; " }}{% endif %}{% if not a.active %} · thôi dùng{% endif %}</summary>
+{% include "itdesk/_form.html" %}</details>{% endwith %}{% empty %}<p>Sổ đang trống.</p>{% endfor %}
+<details class="box"{% if not rows %} open{% endif %}><summary><b>+ Thêm tài khoản</b></summary>{% include "itdesk/_form.html" with a=None %}</details>
+{% endblock %}

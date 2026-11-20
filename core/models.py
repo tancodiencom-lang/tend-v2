@@ -1,4 +1,4 @@
-"""Tài khoản theo 5 vai và nhật ký thay đổi chỉ thêm (không sửa, không xoá)."""
+"""Tài khoản theo vai (5 vai gốc + Marketing từ đợt 10a) và nhật ký thay đổi chỉ thêm (không sửa, không xoá)."""
 from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
 
@@ -11,6 +11,7 @@ class Role(models.TextChoices):
     DESIGNER = "designer", "Thiết kế"
     INTERNAL_ACCOUNTANT = "internal", "Kế toán nội bộ"
     FINANCE_ACCOUNTANT = "finance", "Kế toán tài chính"
+    MARKETING = "marketing", "Marketing"
 
 
 class Manager(UserManager):
@@ -53,6 +54,11 @@ class User(AbstractUser):
     @property
     def sees_profit(self):
         return self.is_director or self.role == Role.FINANCE_ACCOUNTANT
+
+    @property
+    def does_marketing(self):
+        """Trợ lý nội dung số: xem ảnh hiện trường mọi công trình (không tiền), duyệt/sửa/đăng bài, giao nội dung."""
+        return self.is_director or self.role == Role.MARKETING
 
     @property
     def edits_drawings(self):

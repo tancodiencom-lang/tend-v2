@@ -23,6 +23,8 @@ def shell(request):
     # Báo cáo: mọi vai (phần tiền theo quyền)
     tabs.append({"key": "reports", "label": "Báo cáo", "url": reverse("reports"), "match": ("reports", "money_")})
     tabs.append({"key": "assistant", "label": "Trợ lý", "url": reverse("assistant")})
+    if user.does_marketing:
+        tabs.append({"key": "marketing", "label": "Nội dung", "url": reverse("marketing")})
     role = "Giám đốc" if user.is_superuser else user.get_role_display()
     tabs.append({"key": "account", "label": user.first_name or user.get_full_name() or user.username, "role": role,
                  "url": reverse("account"), "person": True,

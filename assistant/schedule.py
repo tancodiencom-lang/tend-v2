@@ -177,7 +177,11 @@ def morning_text(user, now, found=None):
     questions = list(Question.objects.filter(state=Question.State.OPEN).select_related("asked_by"))
     out += [f"• Câu hỏi #{q.pk} của {q.asked_by} ({q.where}): {q.text[:150]} (bấm ✍ Tôi trả lời ở tin trợ lý đã gửi)"
             for q in questions]
-    if not waiting and not voids and not questions:
+    from marketing.models import Post
+    drafts = Post.objects.filter(state__in=(Post.State.DRAFT, Post.State.FAILED, Post.State.UNKNOWN)).count()
+    if drafts:
+        out.append(f"• {drafts} bài đăng Facebook chờ duyệt/xử lý: {settings.APP_URL}/noi-dung/")
+    if not waiting and not voids and not questions and not drafts:
         out.append("• Không có.")
     found = alerts(today) if found is None else found
     out.append("\n② Cảnh báo")
@@ -202,6 +206,11 @@ def morning_text(user, now, found=None):
         out.append(f"• {task_line(t, now)} — trợ lý {did}")
     if not late:
         out.append("• Không có.")
+    from itdesk.services import attention
+    accounts = attention(today)
+    if accounts:
+        out.append("\nTrợ lý IT — tài khoản cần làm (sổ tài khoản):")
+        out += [f"• {line}" for line in accounts[:8]] + [f"Xem: {settings.APP_URL}/so-tai-khoan/"]
     offline = User.objects.filter(is_active=True).exclude(chat_links__active=True).exclude(role=Role.DIRECTOR).exclude(is_superuser=True)
     if offline.exists():
         out.append("\nChưa kết nối Telegram (trợ lý không nhắn được): " + ", ".join(str(u) for u in offline[:10]))
@@ -347,6 +356,32 @@ def send_group(key, group, text, now=None):
     return True
 
 
+def marketing_run(now, local, stamp, done):
+    """Trợ lý nội dung: gom ảnh mới mỗi lượt; 08:00 (mọi ngày, kể cả Chủ nhật) soạn bài nháp hằng ngày và gửi người duyệt;
+    nhắc bài chờ duyệt quá 6 giờ (một lần mỗi bài, 07:00–21:30). Lỗi ở đây không làm hỏng các việc khác của trợ lý."""
+    import logging
+
+    from marketing import assets as mkt_assets
+    from marketing import bot as mkt_bot
+    from marketing import writer as mkt_writer
+    try:
+        mkt_assets.collect()
+        if window(local, 8, 0, 4) and not sent(f"mkt-daily:{stamp}"):
+            Notice.objects.get_or_create(key=f"mkt-daily:{stamp}", defaults={"text": "Soạn bài nháp hằng ngày", "sent_at": now})
+            for post in mkt_writer.daily(now):
+                mkt_bot.send_preview(post)
+                done.append(f"mkt-draft:{post.pk}")
+        if time(7, 0) <= local.time() < time(21, 30):
+            for post in mkt_bot.stale_drafts(now):
+                key = f"mkt-wait:{post.pk}"
+                if not sent(key):
+                    Notice.objects.get_or_create(key=key, defaults={"text": "Nhắc duyệt bài", "sent_at": now})
+                    mkt_bot.notify(f"Bài #{post.pk} ({post.for_date:%d/%m}) chờ duyệt đã hơn 6 giờ. Xem lại: /noidung {post.pk}")
+                    done.append(key)
+    except Exception as error:
+        logging.getLogger(__name__).warning("Trợ lý nội dung lỗi (%s)", type(error).__name__)
+
+
 # ---------- chạy ----------
 
 def run(now=None):
@@ -425,6 +460,8 @@ def run(now=None):
                 for user in directors():
                     go(f"task:{task.pk}:esc:{user.pk}", user, f"Việc trễ sau khi đã nhắc: {task_line(task, now)}."
                        f"\nĐã nhắc {task.owner} lúc {timezone.localtime(reminded.sent_at):%d/%m %H:%M}, chưa báo xong.")
+
+    marketing_run(now, local, stamp, done)
 
     for question in Question.objects.filter(state=Question.State.OPEN, created_at__lte=now - QUESTION_REMIND):
         for user in directors():

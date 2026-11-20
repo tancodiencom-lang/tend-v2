@@ -31,6 +31,8 @@ INSTALLED_APPS = [
     "overview",
     "chat",
     "assistant",
+    "marketing",
+    "itdesk",
 ]
 
 MIDDLEWARE = [
@@ -106,6 +108,10 @@ TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
 TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
 TEND_AI_MODEL = env("TEND_AI_MODEL", default="claude-haiku-5-5")
 TEND_AI_MONTHLY_USD = env.float("TEND_AI_MONTHLY_USD", default=4.0)
+# Trợ lý nội dung số (đợt 10a): số bài nháp mỗi ngày; thư mục ảnh Drive đã kéo về máy chủ (ha-tang/keo-anh-noi-dung.sh).
+# Khoá Facebook: TEND_META_TOKEN (và TEND_META_TOKEN_<TÊN> cho tài khoản khác) — đọc thẳng từ môi trường, không qua settings.
+TEND_MKT_DAILY = env.int("TEND_MKT_DAILY", default=1)
+TEND_MKT_DRIVE_DIR = env("TEND_MKT_DRIVE_DIR", default="")
 
 LOGGING = {"version": 1, "disable_existing_loggers": False,
            "handlers": {"console": {"class": "logging.StreamHandler"}},

@@ -1,0 +1,9 @@
+[Unit]
+Description=Dang bai da duyet moi 2 phut
+
+[Timer]
+OnCalendar=*:0/2
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% block title %}Trang đăng, giọng văn{% endblock %}
+{% block content %}
+<p><a href="{% url 'marketing' %}">‹ Nội dung</a></p>
+<h1>Trang đăng và giọng văn</h1>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+<h2>Trang Facebook</h2>
+<p class="muted">Khoá Facebook <b>không nhập ở đây và không gửi qua chat</b>: người quản trị máy chủ ghi vào tệp .env
+(<code>TEND_META_TOKEN</code>, tài khoản khác <code>TEND_META_TOKEN_&lt;TÊN&gt;</code> rồi ghi &lt;TÊN&gt; vào ô Tài khoản Meta). Khoá cần quyền
+pages_manage_posts, pages_read_engagement, pages_show_list trên Trang.</p>
+{% for c in channels %}<section class="card"><header><b>{{ c.name }}</b> · facebook.com/{{ c.page }}{% if c.page_id %} · mã {{ c.page_id }}{% endif %} · {% if c.active %}● đang dùng{% else %}▼ tắt{% endif %}{% if c.default %} · mặc định{% endif %}</header>
+{% if c.check_note %}<p>{{ c.check_note }} <span class="muted">({{ c.checked_at|date:"d/m H:i" }})</span></p>{% endif %}
+{% if user.is_director %}<form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="channel"><input type="hidden" name="id" value="{{ c.pk }}">
+<label>Tên <input type="text" name="name" value="{{ c.name }}"></label><label>Mã Trang <input type="text" name="page" value="{{ c.page }}"></label>
+<label>Tài khoản Meta <input type="text" name="account" value="{{ c.account }}" placeholder="trống = TEND_META_TOKEN"></label>
+<label class="check"><input type="checkbox" name="default" value="1"{% if c.default %} checked{% endif %}> Mặc định</label>
+<label>Trạng thái <select name="active"><option value="1"{% if c.active %} selected{% endif %}>Đang dùng</option><option value="0"{% if not c.active %} selected{% endif %}>Tắt</option></select></label>
+<button class="btn plain" type="submit">Lưu</button></form>
+<form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="check"><input type="hidden" name="id" value="{{ c.pk }}"><button class="btn plain" type="submit">Kiểm tra kết nối</button></form>{% endif %}
+<form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="import"><input type="hidden" name="id" value="{{ c.pk }}"><button class="btn plain" type="submit">Lấy 30 bài cũ làm mẫu giọng văn</button></form>
+</section>{% endfor %}
+{% if user.is_director %}<details class="box"{% if not channels %} open{% endif %}><summary><b>+ Thêm Trang</b></summary>
+<form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="channel">
+<label>Tên hiển thị <input type="text" name="name" required placeholder="vd TenD Công trình"></label>
+<label>Mã Trang hoặc đường dẫn <input type="text" name="page" required placeholder="vd https://facebook.com/tendct"></label>
+<label>Tài khoản Meta <input type="text" name="account" placeholder="trống = TEND_META_TOKEN"></label>
+<label class="check"><input type="checkbox" name="default" value="1" checked> Mặc định</label><button class="btn" type="submit">Thêm</button></form></details>{% endif %}
+
+<h2>Bài mẫu giọng văn ({{ samples|length }})</h2>
+<p class="muted">Trợ lý viết theo các bài mẫu đang dùng (tối đa 8 bài mới nhất). Lấy bài cũ của Trang bằng nút ở trên, hoặc dán bài anh/chị ưng.</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="sample"><textarea name="text" rows="5" style="width:100%" placeholder="Dán một bài mẫu"></textarea><button class="btn plain" type="submit">Thêm bài mẫu</button></form>
+<ul>{% for s in samples %}<li>{% if s.active %}●{% else %}○{% endif %} {{ s.get_source_display }} · {{ s.text|truncatechars:160 }}
+<form method="post" style="display:inline">{% csrf_token %}<input type="hidden" name="action" value="toggle-sample"><input type="hidden" name="id" value="{{ s.pk }}"><button class="btn plain" type="submit">{% if s.active %}Thôi dùng{% else %}Dùng{% endif %}</button></form></li>{% endfor %}</ul>
+{% endblock %}

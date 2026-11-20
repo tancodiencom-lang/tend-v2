@@ -1,0 +1,10 @@
+[Unit]
+Description=Tro ly noi dung: keo anh tu thu muc Google Drive ve kho anh (chi doc tren Drive)
+After=network-online.target postgresql.service
+Wants=network-online.target
+OnFailure=tend-v2-canh-bao@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /srv/tend-v2/app/ha-tang/keo-anh-noi-dung.sh
+Nice=10

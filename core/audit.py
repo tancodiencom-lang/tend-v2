@@ -8,6 +8,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Model
 from django.db.models.fields.files import FieldFile
 from django.forms.models import model_to_dict
 
@@ -48,6 +49,8 @@ def _plain(value):
         return {k: _plain(v) for k, v in value.items()}
     if isinstance(value, FieldFile):   # tệp (có thể trống)
         return value.name or ""
+    if isinstance(value, Model):       # trường nhiều-nhiều (model_to_dict trả bản ghi): ghi mã
+        return value.pk
     return value
 
 

@@ -1,0 +1,410 @@
+"""Đợt 10a: trợ lý nội dung (kho ảnh, bài nháp hằng ngày, duyệt đúng bản, đăng nhiều ảnh có sổ, đối soát) và trợ lý IT
+(sổ tài khoản, xoá tin có mật khẩu/khoá). Telegram giả, Facebook giả, AI giả: không gọi mạng."""
+import io
+import json
+import os
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
+from unittest import mock
+
+from django.core.management import call_command
+from django.urls import reverse
+from django.utils import timezone
+from PIL import Image
+
+from assistant import schedule
+from assistant.models import Feedback
+from chat import ai, telegram
+from chat.models import ChatPhoto, Proposal
+from chat.tests import BotCase
+from core.models import AuditLog, Role, User
+from field.models import Photo
+from itdesk import services as it_services
+from itdesk.models import ServiceAccount
+from projects.models import Member
+
+from . import assets, facebook, publish, services, writer
+from .models import Asset, Channel, Idea, Post, PostTarget, PublishStep, StyleSample
+
+
+def exif_jpeg():
+    picture = Image.new("RGB", (40, 30), (200, 180, 150))
+    exif = Image.Exif()
+    exif[0x010F] = "MayAnh"                       # hãng máy (đại diện cho thông tin EXIF/GPS phải bỏ)
+    out = io.BytesIO()
+    picture.save(out, "JPEG", exif=exif.tobytes())
+    return out.getvalue()
+
+
+class FakeFacebook:
+    """Graph API giả: ghi lại lời gọi; có thể gây lỗi ở bước chỉ định."""
+
+    def __init__(self):
+        self.calls, self.fail_upload, self.fail_feed, self.feed_seen = [], None, None, []
+
+    def __call__(self, method, path, params=None, token="", files=None):
+        self.calls.append((method, path, dict(params or {}), bool(files)))
+        if method == "GET" and path.endswith("/posts"):
+            return {"data": [{"id": "1_1", "message": "Phòng khách tân cổ điển hoàn thiện, phào chỉ dát vàng tinh tế. Nhắn TenD để được tư vấn!"},
+                             {"id": "1_2", "message": ""}]}
+        if method == "GET" and path.endswith("/feed"):
+            return {"data": self.feed_seen}
+        if method == "GET" and "_" in path:
+            return {"permalink_url": f"https://www.facebook.com/{path}"}
+        if method == "GET":
+            return {"id": "1234", "name": "TenD Công trình", "access_token": "PAGE-TOKEN"}
+        if path.endswith("/photos"):
+            if self.fail_upload:
+                raise self.fail_upload
+            return {"id": f"ph{sum(1 for c in self.calls if c[1].endswith('/photos'))}"}
+        if path.endswith("/feed"):
+            if self.fail_feed:
+                error, self.fail_feed = self.fail_feed, None
+                raise error
+            return {"id": "1234_999"}
+        raise AssertionError(path)
+
+    def posts(self, kind):
+        return [c for c in self.calls if c[0] == "POST" and c[1].endswith(kind)]
+
+
+class MarketingCase(BotCase):
+    def setUp(self):
+        super().setUp()
+        self.media = []
+        distinct = mock.patch.object(telegram, "download", side_effect=lambda file_id: (self.colored(file_id), f"{file_id}.jpg"))
+        distinct.start()
+        self.addCleanup(distinct.stop)
+        files = mock.patch.object(telegram, "post_files", side_effect=self.fake_files)
+        files.start()
+        self.addCleanup(files.stop)
+        self.fb = FakeFacebook()
+        graph = mock.patch.object(facebook, "request", side_effect=self.fb)
+        graph.start()
+        self.addCleanup(graph.stop)
+        env = mock.patch.dict(os.environ, {"TEND_META_TOKEN": "USER-TOKEN"})
+        env.start()
+        self.addCleanup(env.stop)
+        facebook._page_tokens.clear()
+        self.mkt = User.objects.create_user("marketing", password="x-123-abcd", role=Role.MARKETING, first_name="Lan")
+        self.connect(self.mkt)
+        self.channel = services.save_channel(self.director, name="TenD Công trình", page="https://web.facebook.com/tendct")
+        self.sent.clear()
+
+    @staticmethod
+    def colored(file_id):
+        import hashlib
+        rgb = tuple(hashlib.sha256(file_id.encode()).digest()[:3])
+        out = io.BytesIO()
+        Image.new("RGB", (16, 12), rgb).save(out, "JPEG")
+        return out.getvalue()
+
+    def fake_files(self, method, data, files):
+        self.media.append((method, data, files))
+        self.sent.append((method, {**data, "files": len(files)}))
+        return [{"message_id": 1}]
+
+    shots = 0
+
+    def report_with_photos(self, count=3):
+        for i in range(count):
+            MarketingCase.shots += 1
+            self.message(self.site, "T1.2" if i == 0 else "", photo=f"anh{MarketingCase.shots}")
+        self.message(self.site, "TN-22 T1.2 40%. Công: Nam")
+        proposal = self.proposal()
+        for photo in proposal.photos.filter(target="?"):
+            self.press(self.site, f"ph:{photo.pk}:0")
+        self.press(self.site, f"ok:{proposal.pk}")
+        return Photo.objects.count()
+
+    def ready_post(self, photos=3):
+        self.report_with_photos(photos)
+        assets.collect()
+        post = writer.daily()[0]
+        return post
+
+
+class AssetAndDraftTests(MarketingCase):
+    def test_collect_report_photos_only_never_vouchers_and_no_duplicates(self):
+        self.assertEqual(self.report_with_photos(2), 2)
+        self.message(self.accountant, "", photo="phieuchi1")                   # ảnh phiếu chi: không bao giờ vào kho
+        self.message(self.accountant, "chi khác 200k vật tư lặt vặt TN-22")
+        self.press(self.accountant, f"ok:{self.proposal().pk}")
+        self.assertEqual(assets.collect(), {"bao_cao": 2, "drive": 0})
+        self.assertEqual(assets.collect(), {"bao_cao": 0, "drive": 0})
+        rows = list(Asset.objects.all())
+        self.assertEqual({a.source for a in rows}, {Asset.Source.REPORT})
+        self.assertTrue(all(a.project == self.project for a in rows))
+        self.assertIn("Tầng 1", [a for a in rows if a.context.startswith("Xây") or "Tầng" in a.context][0].context)
+
+    def test_drive_folder_with_project_code(self):
+        import shutil
+        from uuid import uuid4
+
+        from django.conf import settings
+        from django.test import override_settings
+        root = os.path.join(settings.MEDIA_ROOT, f"drive-{uuid4().hex[:8]}")
+        self.addCleanup(shutil.rmtree, root, True)
+        folder = os.path.join(root, "Ảnh công trình", "TN-22 phòng khách")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "pk1.jpg"), "wb") as handle:
+            handle.write(exif_jpeg())
+        with override_settings(TEND_MKT_DRIVE_DIR=root):
+            self.assertEqual(assets.collect_drive(), 1)
+            self.assertEqual(assets.collect_drive(), 0)
+        asset = Asset.objects.get(source=Asset.Source.DRIVE)
+        self.assertEqual((asset.project, asset.context), (self.project, "Ảnh công trình / TN-22 phòng khách"))
+        self.assertTrue(asset.image.name.startswith(os.path.basename(root) + "/"))    # trỏ tệp gốc, không chép
+
+    def test_daily_draft_without_ai_preview_to_reviewers_once_a_day(self):
+        self.report_with_photos(3)
+        with self.captureOnCommitCallbacks(execute=True):
+            done = schedule.run(timezone.make_aware(datetime.combine(timezone.localdate(), datetime.min.time())) + timedelta(hours=8, minutes=5))
+        post = Post.objects.get()
+        self.assertIn(f"mkt-draft:{post.pk}", done)
+        self.assertEqual((post.state, post.ai_written, post.items.count()), (Post.State.DRAFT, False, 3))
+        self.assertIn("Chưa bật trợ lý AI", post.note)
+        self.assertEqual(list(post.channels.all()), [self.channel])
+        for user in (self.director, self.mkt):
+            chat = self.chats[user.pk]
+            self.assertTrue(any(m == "sendMediaGroup" and d["chat_id"] == chat and d["files"] == 3 for m, d in self.sent))
+            buttons = self.last_buttons(chat)
+            self.assertEqual(buttons["✓ Duyệt và đăng"], f"mk:a:{post.pk}:{post.package_sha[:10]}")
+        self.assertNotIn(self.chats[self.site.pk], [d["chat_id"] for m, d in self.sent if m == "sendMediaGroup"])
+        schedule.run(timezone.make_aware(datetime.combine(timezone.localdate(), datetime.min.time())) + timedelta(hours=9))
+        self.assertEqual(Post.objects.count(), 1)                                   # mỗi ngày một lần
+        self.assertEqual(self.channel.page, "tendct")
+
+    def test_ai_gets_photos_and_work_context_but_no_project_name(self):
+        self.report_with_photos(2)
+        assets.collect()
+        captured = {}
+
+        def fake_create(**kwargs):
+            captured.update(kwargs)
+            text = json.dumps({"photos": [1, 0], "text": "Phòng khách đang hoàn thiện ✨", "note": "Chọn ảnh rõ nhất"})
+            return SimpleNamespace(stop_reason="end_turn", usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+                                   content=[SimpleNamespace(type="text", text=text)])
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "create_message", side_effect=fake_create):
+            post = writer.daily()[0]
+        self.assertEqual((post.text, post.ai_written, post.note), ("Phòng khách đang hoàn thiện ✨", True, "Chọn ảnh rõ nhất"))
+        self.assertEqual(captured["output_config"]["format"]["type"], "json_schema")
+        self.assertNotIn("tool_choice", captured)
+        content = captured["messages"][0]["content"]
+        self.assertEqual(sum(1 for b in content if b["type"] == "image"), 2)
+        prompt = json.dumps(captured, ensure_ascii=False, default=str)
+        self.assertNotIn("Thiên Nga", prompt)
+        self.assertNotIn("TN-22", prompt)
+        self.assertIn("KHÔNG nêu tên chủ nhà", captured["system"][0]["text"])
+        first = [i.asset for i in post.items.order_by("order")]
+        self.assertEqual(len(first), 2)
+
+
+class ApprovalTests(MarketingCase):
+    def test_approval_binds_to_seen_version_and_rights(self):
+        post = self.ready_post(2)
+        old = f"mk:a:{post.pk}:{post.package_sha[:10]}"
+        self.press(self.mkt, f"mk:e:{post.pk}")
+        self.message(self.mkt, "Chữ mới của bài, ngắn gọn hơn.")
+        post.refresh_from_db()
+        self.assertEqual(post.text, "Chữ mới của bài, ngắn gọn hơn.")
+        self.assertEqual(Proposal.objects.filter(link__user=self.mkt).count(), 0)    # tin sửa chữ không thành phiếu báo cáo
+        self.press(self.mkt, old)
+        post.refresh_from_db()
+        self.assertEqual(post.state, Post.State.DRAFT)                               # nút của bản cũ bị từ chối
+        self.press(self.site, f"mk:a:{post.pk}:{post.package_sha[:10]}")
+        post.refresh_from_db()
+        self.assertEqual(post.state, Post.State.DRAFT)                               # giám sát không duyệt được
+        self.press(self.mkt, f"mk:a:{post.pk}:{post.package_sha[:10]}")
+        post.refresh_from_db()
+        self.assertEqual((post.state, post.approved_by, post.approved_sha), (Post.State.APPROVED, self.mkt, post.package_sha))
+        self.assertEqual(PostTarget.objects.get(post=post).state, PostTarget.State.PENDING)
+        self.assertIn("Lan đã duyệt bài", self.texts(self.chats[self.director.pk])[-1])
+
+    def test_swap_block_remove_move_first_change_version(self):
+        post = self.ready_post(4)
+        self.report_with_photos(2)
+        assets.collect()
+        shas, first = {post.package_sha}, [i.asset_id for i in post.items.order_by("order")]
+        post = services.swap_asset(self.mkt, post, 0, block=True)
+        self.assertTrue(Asset.objects.get(pk=first[0]).blocked)
+        self.assertNotIn(first[0], [i.asset_id for i in post.items.all()])
+        shas.add(post.package_sha)
+        post = services.move_first(self.mkt, post, 2)
+        shas.add(post.package_sha)
+        post = services.remove_asset(self.mkt, post, 1)
+        shas.add(post.package_sha)
+        self.assertEqual(len(shas), 4)
+        self.assertEqual(post.items.count(), 3)
+        self.assertTrue(AuditLog.objects.filter(table="marketing.Asset", reason="Ảnh không dùng cho bài đăng nữa").exists())
+
+
+class PublishTests(MarketingCase):
+    def approve(self, post):
+        return services.approve(self.director, post, post.package_sha[:10])
+
+    def test_multi_photo_post_with_ledger_no_exif_and_link(self):
+        post = self.ready_post(3)
+        self.approve(post)
+        uploads = []
+        real = assets.for_publish
+        with mock.patch.object(assets, "for_publish", side_effect=lambda a: uploads.append(real(a)) or uploads[-1]):
+            with self.captureOnCommitCallbacks(execute=True):
+                call_command("dang_bai", stdout=io.StringIO())
+        post.refresh_from_db()
+        target = PostTarget.objects.get(post=post)
+        self.assertEqual((post.state, target.state, target.remote_id), (Post.State.PUBLISHED, PostTarget.State.PUBLISHED, "1234_999"))
+        self.assertEqual(target.permalink, "https://www.facebook.com/1234_999")
+        photos = self.fb.posts("/photos")
+        self.assertEqual(len(photos), 3)
+        self.assertTrue(all(c[2]["published"] == "false" and c[3] for c in photos))
+        feed = self.fb.posts("/feed")
+        self.assertEqual(len(feed), 1)
+        self.assertEqual(feed[0][1], "1234/feed")
+        self.assertEqual([json.loads(feed[0][2][f"attached_media[{i}]"])["media_fbid"] for i in range(3)], ["ph1", "ph2", "ph3"])
+        steps = list(PublishStep.objects.filter(target=target).values_list("step", flat=True))
+        self.assertEqual(steps, ["upload_intent", "upload_done"] * 3 + ["feed_intent", "feed_done", "verify"])
+        self.assertTrue(all(not Image.open(io.BytesIO(data)).getexif() for data in uploads))   # không còn EXIF
+        self.assertTrue(any("✓ Đã đăng bài" in t and "1234_999" in t for t in self.texts(self.chats[self.mkt.pk])), self.texts())
+        call_command("dang_bai", stdout=io.StringIO())
+        self.assertEqual(len(self.fb.posts("/feed")), 1)                              # chạy lại không đăng trùng
+
+    def test_timeout_after_feed_is_reconciled_never_reposted(self):
+        post = self.ready_post(2)
+        self.approve(post)
+        self.fb.fail_feed = facebook.FacebookError("Hết giờ chờ", sent=True)
+        call_command("dang_bai", stdout=io.StringIO())
+        post.refresh_from_db()
+        target = PostTarget.objects.get(post=post)
+        self.assertEqual((post.state, target.state), (Post.State.UNKNOWN, PostTarget.State.UNKNOWN))
+        self.assertIn("✓ Đã có trên Trang", self.last_buttons(self.chats[self.director.pk]))
+        call_command("dang_bai", stdout=io.StringIO())                               # chưa thấy bài: vẫn đối soát
+        self.assertEqual(len(self.fb.posts("/feed")), 1)
+        self.fb.feed_seen = [{"id": "1234_777", "message": post.text, "permalink_url": "https://facebook.com/1234_777"}]
+        call_command("dang_bai", stdout=io.StringIO())
+        target.refresh_from_db()
+        post.refresh_from_db()
+        self.assertEqual((target.state, target.remote_id, post.state), (PostTarget.State.PUBLISHED, "1234_777", Post.State.PUBLISHED))
+        self.assertEqual(len(self.fb.posts("/feed")), 1)                              # không bao giờ POST lại
+
+    def test_upload_error_fails_without_post_then_retry(self):
+        post = self.ready_post(2)
+        self.approve(post)
+        self.fb.fail_upload = facebook.FacebookError("Không kết nối được Facebook", sent=False)
+        call_command("dang_bai", stdout=io.StringIO())
+        post.refresh_from_db()
+        self.assertEqual(post.state, Post.State.FAILED)
+        self.assertEqual(self.fb.posts("/feed"), [])
+        self.assertEqual(self.last_buttons(self.chats[self.director.pk]), {"↻ Thử lại": f"mk:t:{post.pk}"})
+        self.fb.fail_upload = None
+        self.press(self.director, f"mk:t:{post.pk}")
+        call_command("dang_bai", stdout=io.StringIO())
+        post.refresh_from_db()
+        self.assertEqual(post.state, Post.State.PUBLISHED)
+        self.assertEqual(list(PostTarget.objects.filter(post=post).values_list("attempt", "state")),
+                         [(1, PostTarget.State.FAILED), (2, PostTarget.State.PUBLISHED)])
+
+    def test_missing_token_is_clear_error(self):
+        post = self.ready_post(1)
+        self.approve(post)
+        with mock.patch.dict(os.environ, {"TEND_META_TOKEN": ""}):
+            facebook._page_tokens.clear()
+            call_command("dang_bai", stdout=io.StringIO())
+        self.assertIn("TEND_META_TOKEN", PostTarget.objects.get(post=post).error)
+
+
+class CommandAndWebTests(MarketingCase):
+    def test_baiviet_with_sent_photo_and_ytuong(self):
+        self.message(self.mkt, "", photo="mkt1")
+        self.message(self.mkt, "/baiviet TN-22 khoe phòng khách mới hoàn thiện")
+        post = Post.objects.get()
+        self.assertEqual((post.origin, post.project, post.idea.state, post.idea.kind),
+                         (Post.Origin.REQUEST, self.project, Idea.State.USED, Idea.Kind.REQUEST))
+        self.assertEqual(post.items.order_by("order").first().asset.source, Asset.Source.UPLOAD)
+        self.assertEqual(ChatPhoto.objects.get(file_unique_id="mkt1").target, "noi-dung")
+        self.assertTrue(any(m == "sendPhoto" for m, _, _ in self.media))
+        self.message(self.mkt, "/ytuong Trước–sau mặt tiền, nhấn phào chỉ")
+        self.assertEqual(Idea.objects.filter(state=Idea.State.OPEN).get().text, "Trước–sau mặt tiền, nhấn phào chỉ")
+        self.message(self.site, "/ytuong thử")
+        self.assertIn("Giám đốc và nhân viên Marketing", self.texts(self.chats[self.site.pk])[-1])
+        self.message(self.mkt, "/noidung")
+        self.assertIn(f"#{post.pk}", self.texts(self.chats[self.mkt.pk])[-1])
+
+    def test_web_pages_rights_and_actions(self):
+        post = self.ready_post(2)
+        self.client.force_login(self.site)
+        self.assertEqual(self.client.get(reverse("marketing")).status_code, 403)
+        asset = post.items.first().asset
+        self.assertEqual(self.client.get(reverse("marketing_image", args=[asset.pk])).status_code, 403)
+        self.client.force_login(self.mkt)
+        self.assertContains(self.client.get(reverse("marketing")), f"Bài #{post.pk}")
+        self.assertEqual(self.client.get(reverse("marketing_image", args=[asset.pk]), {"w": 200})["Content-Type"], "image/jpeg")
+        self.client.post(reverse("marketing_post_action", args=[post.pk, "sua"]), {"text": "Chữ sửa trên web"})
+        post.refresh_from_db()
+        self.client.post(reverse("marketing_post_action", args=[post.pk, "duyet"]), {"sha": post.package_sha[:10]})
+        post.refresh_from_db()
+        self.assertEqual((post.text, post.state), ("Chữ sửa trên web", Post.State.APPROVED))
+        page = self.client.post(reverse("marketing_settings"), {"action": "channel", "name": "Trang 2", "page": "trang2"}, follow=True)
+        self.assertContains(page, "Chỉ Giám đốc")
+        self.client.force_login(self.director)
+        self.client.post(reverse("marketing_settings"), {"action": "check", "id": self.channel.pk})
+        self.channel.refresh_from_db()
+        self.assertEqual(self.channel.page_id, "1234")
+        self.assertIn("✓ Kết nối được Trang", self.channel.check_note)
+        self.client.post(reverse("marketing_settings"), {"action": "import", "id": self.channel.pk})
+        self.client.post(reverse("marketing_settings"), {"action": "import", "id": self.channel.pk})
+        self.assertEqual(StyleSample.objects.count(), 1)                              # bài trống bỏ, chạy lại không trùng
+        self.assertIn("Nội dung", self.client.get(reverse("overview")).content.decode())
+
+
+class SecretTests(MarketingCase):
+    def test_private_secret_deleted_warned_never_stored_or_sent_to_ai(self):
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "run") as run:
+            self.message(self.site, "anh ơi mật khẩu: Tend@2026xyz của email công ty")
+            run.assert_not_called()
+        self.assertTrue(any(m == "deleteMessage" for m, _ in self.sent))
+        self.assertIn("ĐỔI mật khẩu", self.texts(self.chats[self.site.pk])[-1])
+        self.assertIn("Minh vừa nhắn mật khẩu", self.texts(self.chats[self.director.pk])[-1])
+        self.assertFalse(Feedback.objects.exists())
+        self.assertFalse(Proposal.objects.exists())
+        self.assertFalse(any("Tend@2026xyz" in str(log.after) for log in AuditLog.objects.all()))
+        self.message(self.site, "/gopy key mới là sk-ant-api03-abcdefghijklmnop nhé")       # bị xoá trước khi thành góp ý
+        self.assertFalse(Feedback.objects.exists())
+        from assistant import services as assistant_services
+        row = assistant_services.add_feedback(self.site, "lỗi khi dán ghp_abcdefghijklmnopqrstuvwxyz123456")
+        self.assertIn("[mật khẩu/khoá đã che]", row.text)
+
+    def test_group_secret_alert(self):
+        from chat.tests_group import GROUP
+        self.message(self.director, "")      # no-op để có đủ kết nối
+        msg = {"message_id": 77, "chat": {"id": GROUP, "type": "supergroup", "title": "Công trường TN-22"},
+               "from": {"id": self.site.pk + 9000, "first_name": "giamsat"}, "text": "mã bot 123456789:AAEhBP0av28iQ9BsYc_ABCDEFGHIJKLMNOPQR"}
+        from chat import bot
+        bot.handle_update({"update_id": 99999, "message": msg})
+        self.assertIn(("deleteMessage", {"chat_id": str(GROUP), "message_id": 77}), self.sent)
+        self.assertIn("mã bot Telegram", [d["text"] for m, d in self.sent if m == "sendMessage" and str(d["chat_id"]) == str(GROUP)][-1])
+
+
+class ItDeskTests(MarketingCase):
+    def test_ledger_refuses_secrets_reminds_and_director_only(self):
+        today = timezone.localdate()
+        with self.assertRaises(Exception):
+            it_services.save(self.director, name="Facebook tendct", note="mật khẩu: Abc12345!")
+        it_services.save(self.director, name="Tên miền tend.vn", kind="ten_mien", expires_on=today + timedelta(days=12),
+                         vault_ref="Tend / Tên miền", owner=self.director)
+        it_services.save(self.director, name="Khoá Meta TEND_META_TOKEN", kind="khoa_api", rotated_on=today - timedelta(days=100),
+                         rotate_days=90, two_factor="chua")
+        lines = it_services.attention(today)
+        self.assertTrue(lines[0].startswith("▼ cần làm ngay Khoá Meta"))
+        self.assertIn("quá hạn đổi mật khẩu/khoá", lines[0])
+        self.assertIn("chưa bật xác thực 2 lớp", lines[0])
+        self.assertIn("● cần để ý Tên miền tend.vn: hết hạn", lines[1])
+        text = schedule.morning_text(self.director, timezone.now())
+        self.assertIn("Trợ lý IT — tài khoản cần làm", text)
+        self.client.force_login(self.mkt)
+        self.assertEqual(self.client.get(reverse("itdesk")).status_code, 403)
+        self.client.force_login(self.director)
+        page = self.client.post(reverse("itdesk"), {"name": "GitHub", "note": "token ghp_abcdefghijklmnopqrstuvwxyz123456"}, follow=True)
+        self.assertContains(page, "Không ghi mật khẩu hay khoá")
+        self.assertEqual(ServiceAccount.objects.count(), 2)
+        self.assertTrue(AuditLog.objects.filter(table="itdesk.ServiceAccount", action="create").exists())

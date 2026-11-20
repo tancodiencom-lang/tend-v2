@@ -78,3 +78,4 @@ h2+.cards{margin-top:8px}.page>h2{margin-top:18px}
 .stack input:not([type=checkbox]),.stack select{min-height:40px;font:inherit;padding:0 8px}
 .grid tr.subtotal td{background:#f4f6f2}.grid tbody tr.floor th small{font-weight:400}
 .grid td.code small{display:block;white-space:normal;max-width:300px}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.gallery .card img{aspect-ratio:4/3;object-fit:cover}

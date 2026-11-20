@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}Bài #{{ post.pk }}{% endblock %}
+{% block content %}
+<p><a href="{% url 'marketing' %}">‹ Nội dung</a></p>
+<h1>Bài #{{ post.pk }} · {{ post.for_date|date:"d/m/Y" }}</h1>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+<p>{% if post.state == "da_dang" %}✓{% elif post.state == "loi" or post.state == "doi_soat" %}▼{% else %}●{% endif %} <b>{{ post.get_state_display }}</b>
+<span class="muted">· {% if post.created_by %}{{ post.created_by }} ({{ post.get_origin_display|lower }}){% else %}trợ lý soạn hằng ngày{% endif %}{% if post.ai_written %} · AI viết{% endif %}</span></p>
+{% if post.note %}<p class="muted">Ghi chú trợ lý: {{ post.note }}</p>{% endif %}
+
+<h2>Ảnh ({{ items|length }}) — ảnh 1 hiện đầu tiên</h2>
+<div class="gallery">{% for it in items %}<section class="card"><img src="{% url 'marketing_image' it.asset_id %}?w=640" alt="Ảnh {{ forloop.counter }}" style="width:100%;border-radius:6px">
+<p><b>Ảnh {{ forloop.counter }}</b> <span class="muted">· {{ it.asset.get_source_display }}{% if it.asset.project %} · {{ it.asset.project.code }}{% endif %}{% if it.asset.taken_on %} · {{ it.asset.taken_on|date:"d/m/Y" }}{% endif %}{% if it.asset.context %} · {{ it.asset.context }}{% endif %}</span></p>
+{% if editable %}<div class="acts">
+<form method="post" action="{% url 'marketing_post_action' post.pk 'doi-anh' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><button class="btn plain" type="submit">🔄 Đổi ảnh khác</button></form>
+<form method="post" action="{% url 'marketing_post_action' post.pk 'doi-anh' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><input type="hidden" name="block" value="1"><button class="btn plain" type="submit">🚫 Không dùng ảnh này nữa</button></form>
+{% if not forloop.first %}<form method="post" action="{% url 'marketing_post_action' post.pk 'len-dau' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><button class="btn plain" type="submit">⬆ Lên đầu</button></form>{% endif %}
+{% if items|length > 1 %}<form method="post" action="{% url 'marketing_post_action' post.pk 'bot-anh' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><button class="btn plain" type="submit">🗑 Bớt</button></form>{% endif %}
+</div>{% endif %}</section>{% empty %}<p class="muted">Bài không có ảnh.</p>{% endfor %}</div>
+
+<h2>Chữ</h2>
+{% if editable %}<form method="post" action="{% url 'marketing_post_action' post.pk 'sua' %}">{% csrf_token %}
+<textarea name="text" rows="10" style="width:100%">{{ post.text }}</textarea><button class="btn" type="submit">Lưu chữ</button></form>
+<form method="post" action="{% url 'marketing_post_action' post.pk 'ai-sua' %}" class="row-form">{% csrf_token %}
+<label>Nhờ trợ lý sửa theo ý <input type="text" name="instruction" placeholder="vd ngắn hơn, thêm câu mời xem nhà mẫu"></label><button class="btn plain" type="submit">Trợ lý sửa</button></form>
+{% else %}<p>{{ post.text|linebreaksbr }}</p>{% endif %}
+
+<h2>Đăng lên</h2>
+{% for c in channels %}<form method="post" action="{% url 'marketing_post_action' post.pk 'kenh' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="channel" value="{{ c.pk }}">
+<button class="btn plain" type="submit"{% if not editable %} disabled{% endif %}>{% if c.pk in chosen %}☑{% else %}☐{% endif %} {{ c.name }}</button></form>{% empty %}<p class="missing">Chưa có Trang nào.</p>{% endfor %}
+
+{% if editable %}<h2>Duyệt</h2>
+<form method="post" action="{% url 'marketing_post_action' post.pk 'duyet' %}">{% csrf_token %}<input type="hidden" name="sha" value="{{ post.package_sha|slice:':10' }}">
+<button class="btn" type="submit">✓ Duyệt và đăng đúng bản này</button></form>
+<form method="post" action="{% url 'marketing_post_action' post.pk 'bo' %}" class="row-form">{% csrf_token %}<label>Lý do bỏ (tuỳ chọn) <input type="text" name="reason"></label><button class="btn plain" type="submit">× Bỏ bài</button></form>
+{% endif %}
+{% if post.state == "loi" %}<form method="post" action="{% url 'marketing_post_action' post.pk 'thu-lai' %}">{% csrf_token %}<button class="btn" type="submit">↻ Thử đăng lại (chưa có bài nào được tạo)</button></form>{% endif %}
+
+{% if targets %}<h2>Sổ đăng</h2>
+{% for t in targets %}<details class="box"{% if t.state == "doi_soat" %} open{% endif %}><summary>{{ t.channel.name }} · lần {{ t.attempt }} · {{ t.get_state_display }}{% if t.permalink %} · <a href="{{ t.permalink }}" target="_blank" rel="noopener">xem bài</a>{% endif %}</summary>
+{% if t.error %}<p class="err">{{ t.error }}</p>{% endif %}
+<ul>{% for s in t.steps.all %}<li>{{ s.at|date:"d/m H:i:s" }} · {{ s.get_step_display }}{% if s.ordinal is not None %} {{ s.ordinal|add:1 }}{% endif %}{% if s.remote_id %} · {{ s.remote_id }}{% endif %}{% if s.detail %} · {{ s.detail }}{% endif %}</li>{% endfor %}</ul>
+{% if t.state == "doi_soat" %}<p>Facebook không trả lời kịp sau khi gửi lệnh tạo bài. Trợ lý không tự đăng lại để tránh trùng. Anh/chị mở Trang kiểm tra:</p>
+<form method="post" action="{% url 'marketing_post_action' post.pk 'doi-soat' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="target" value="{{ t.pk }}"><input type="hidden" name="published" value="1"><button class="btn" type="submit">✓ Đã có trên Trang</button></form>
+<form method="post" action="{% url 'marketing_post_action' post.pk 'doi-soat' %}" style="display:inline">{% csrf_token %}<input type="hidden" name="target" value="{{ t.pk }}"><input type="hidden" name="published" value="0"><button class="btn plain" type="submit">✗ Chưa có, cho thử lại</button></form>{% endif %}
+</details>{% endfor %}{% endif %}
+{% endblock %}

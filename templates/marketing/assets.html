@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block title %}Kho ảnh{% endblock %}
+{% block content %}
+<p><a href="{% url 'marketing' %}">‹ Nội dung</a></p>
+<h1>Kho ảnh nội dung</h1>
+<p class="muted">Tự gom từ ảnh báo cáo hiện trường đã xác nhận (kể cả ảnh gửi trong nhóm công trình) và thư mục Google Drive đã chỉ định;
+ảnh chứng từ thu chi không bao giờ vào kho. Ảnh đã nằm trong bài đăng không dùng lại. 🚫 Loại = không bao giờ chọn ảnh đó nữa.</p>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+<form method="get" class="filters"><select name="cong_trinh"><option value="">Mọi công trình</option>{% for p in projects %}<option value="{{ p.code }}"{% if p == project %} selected{% endif %}>{{ p.code }}</option>{% endfor %}</select>
+<label class="check"><input type="checkbox" name="bo" value="1"{% if blocked %} checked{% endif %}> Ảnh đã loại</label><button class="btn plain" type="submit">Xem</button></form>
+<details class="box"><summary><b>+ Tải ảnh lên kho</b></summary>
+<form method="post" enctype="multipart/form-data" class="row-form">{% csrf_token %}
+<label>Ảnh (tối đa 30) <input type="file" name="images" accept="image/jpeg,image/png,image/webp" multiple required></label>
+<label>Công trình <select name="project"><option value="">—</option>{% for p in projects %}<option value="{{ p.pk }}">{{ p.code }}</option>{% endfor %}</select></label>
+<label>Mô tả <input type="text" name="context" placeholder="vd phòng khách sau hoàn thiện"></label><button class="btn" type="submit">Tải lên</button></form></details>
+<div class="gallery">{% for a in rows %}<section class="card"><img src="{% url 'marketing_image' a.pk %}?w=400" alt="" loading="lazy" style="width:100%;border-radius:6px">
+<p class="muted">{{ a.get_source_display }}{% if a.project %} · {{ a.project.code }}{% endif %}{% if a.taken_on %} · {{ a.taken_on|date:"d/m/Y" }}{% endif %}{% if a.pk in used %} · ✓ đã vào bài{% endif %}<br>{{ a.context }}{% if a.block_reason %}<br>▼ {{ a.block_reason }}{% endif %}</p>
+<form method="post" action="{% url 'marketing_asset_toggle' a.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+<button class="btn plain" type="submit">{% if a.blocked %}Dùng lại{% else %}🚫 Loại{% endif %}</button></form></section>{% empty %}<p>Chưa có ảnh.</p>{% endfor %}</div>
+{% endblock %}

@@ -61,6 +61,49 @@ def post(method, data):
         return None
 
 
+def post_files(method, data, files):
+    """Gửi kèm tệp (multipart): files = {tên trường: (tên tệp, bytes)}. Bài kiểm thay hàm này, không gọi mạng."""
+    key = token()
+    if not key:
+        return None
+    from uuid import uuid4
+    boundary = uuid4().hex
+    parts = []
+    for name, value in data.items():
+        value = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+        parts += [f'--{boundary}', f'Content-Disposition: form-data; name="{name}"', '', value]
+    body = '\r\n'.join(parts).encode()
+    for name, (filename, content) in files.items():
+        body += (f'\r\n--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                 f'Content-Type: image/jpeg\r\n\r\n').encode() + content
+    body += f'\r\n--{boundary}--\r\n'.encode()
+    try:
+        request = urllib.request.Request(f'{API}/bot{key}/{method}', data=body,
+                                         headers={'Content-Type': f'multipart/form-data; boundary={boundary}'})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read().decode()).get('result')
+    except Exception as error:
+        log.warning('Telegram %s lỗi (%s)', method, type(error).__name__)
+        return None
+
+
+def send_media_group(chat_id, photos):
+    """Album 2–10 ảnh (bytes JPEG), mỗi ảnh chú thích số thứ tự; 1 ảnh thì gửi ảnh đơn. Album không có nút bấm (Telegram)."""
+    photos = list(photos)[:10]
+    if not photos:
+        return None
+    if len(photos) == 1:
+        return post_files('sendPhoto', {'chat_id': chat_id, 'caption': 'Ảnh 1'}, {'photo': ('anh-1.jpg', photos[0])})
+    media = [{'type': 'photo', 'media': f'attach://p{i}', 'caption': f'Ảnh {i + 1}'} for i in range(len(photos))]
+    return post_files('sendMediaGroup', {'chat_id': chat_id, 'media': media},
+                      {f'p{i}': (f'anh-{i + 1}.jpg', data) for i, data in enumerate(photos)})
+
+
+def delete(chat_id, message_id):
+    """Xoá tin (bot xoá được tin người dùng gửi trong chat riêng < 48 giờ; trong nhóm cần quyền quản trị)."""
+    return post('deleteMessage', {'chat_id': chat_id, 'message_id': message_id})
+
+
 def keyboard(buttons):
     """buttons: [[{text, data}]] → nút bấm ngay dưới tin nhắn."""
     return {'inline_keyboard': [[{'text': b['text'][:60], 'callback_data': b['data'][:64]} for b in row] for row in buttons]}
