@@ -76,3 +76,5 @@ h2+.cards{margin-top:8px}.page>h2{margin-top:18px}
 .stack{display:flex;flex-direction:column;gap:10px;max-width:560px}.stack label{display:flex;flex-direction:column;gap:4px}
 .stack label.check{flex-direction:row;align-items:center;gap:8px}.stack fieldset{border:1px solid var(--line);border-radius:8px;padding:8px 12px}
 .stack input:not([type=checkbox]),.stack select{min-height:40px;font:inherit;padding:0 8px}
+.grid tr.subtotal td{background:#f4f6f2}.grid tbody tr.floor th small{font-weight:400}
+.grid td.code small{display:block;white-space:normal;max-width:300px}

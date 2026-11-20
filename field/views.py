@@ -19,8 +19,8 @@ from core.models import Role
 from core.text import number
 from projects.models import projects_for
 
-from . import services
-from .models import Attendance, Photo, Trade, Worker
+from . import services, sheet
+from .models import Attendance, Photo, Team, Trade, Worker
 
 ZERO = Decimal(0)
 
@@ -34,44 +34,16 @@ def _month(request):
         return timezone.localdate().replace(day=1)
 
 
-def timesheet(user, first, project=None):
-    """Bảng công một tháng theo quyền: hàng người, cột ngày. Tiền chỉ khi được xem chi phí."""
+def timesheet(user, first, project=None, search=""):
+    """Bảng công một tháng theo quyền, chia khối văn phòng / công nhân / tổ của chủ nhà (field/sheet.py). Tiền chỉ khi được
+    xem chi phí."""
     days = calendar.monthrange(first.year, first.month)[1]
-    last = first.replace(day=days)
     allowed = projects_for(user)
-    rows = Attendance.objects.filter(project__in=allowed, work_date__range=(first, last)).select_related("worker", "staff", "project")
     if project is not None:
-        rows = rows.filter(project=project)
-    people = {}
-    for r in rows:
-        key = ("w", r.worker_id) if r.worker_id else ("s", r.staff_id)
-        person = people.setdefault(key, {"name": r.worker.name if r.worker else str(r.staff), "worker": r.worker,
-                                         "team": r.worker.team if r.worker else "Giám sát", "cells": defaultdict(lambda: ZERO),
-                                         "projects": set(), "dates": set(), "presence": 0})
-        person["cells"][r.work_date.day] += r.days
-        person["projects"].add(r.project.code)
-        person["dates"].add(r.work_date)
-        person["presence"] += 1
-    out = []
-    for key, p in people.items():
-        total = sum(p["cells"].values(), ZERO)
-        row = {"name": p["name"], "team": p["team"], "staff": key[0] == "s", "projects": ", ".join(sorted(p["projects"])),
-               "cells": [p["cells"].get(d) for d in range(1, days + 1)], "total": total, "workdays": len(p["dates"]),
-               "presence": p["presence"]}
-        worker = p["worker"]
-        if worker is not None:
-            row["kind"] = worker.get_kind_display()
-            row["pay"] = worker.get_pay_display()
-            if user.sees_payables:
-                row["rate"] = worker.day_rate
-                if worker.pay == Worker.Pay.DAILY and worker.day_rate is not None:
-                    row["cost"] = total * worker.day_rate
-        out.append(row)
-    out.sort(key=lambda r: (not r["staff"], r["team"], r["name"]))
-    cost = sum((r.get("cost", ZERO) for r in out), ZERO)
-    missing = [r["name"] for r in out if not r["staff"] and r.get("pay") == "Công nhật" and user.sees_payables and r.get("rate") is None]
-    return {"days": list(range(1, days + 1)), "rows": out, "cost": cost, "missing": missing,
-            "weekend": {d for d in range(1, days + 1) if first.replace(day=d).weekday() == 6}}
+        allowed = allowed.filter(pk=project.pk)
+    data = sheet.build(user, allowed, first, first.replace(day=days), search)
+    data["weekend"] = {d for d in data["days"] if first.replace(day=d).weekday() == 6}
+    return data
 
 
 @login_required
@@ -80,36 +52,59 @@ def attendance(request):
     first = _month(request)
     projects = list(projects_for(request.user).order_by("code"))
     project = next((p for p in projects if p.code == request.GET.get("cong_trinh")), None)
-    data = timesheet(request.user, first, project)
+    search = " ".join(request.GET.get("tim", "").split())[:60]
+    data = timesheet(request.user, first, project, search)
     if request.GET.get("tai") == "xlsx":
         return _xlsx(request, first, project, data)
     prev = (first.replace(day=1) - date.resolution).replace(day=1)
     nxt = (first.replace(day=28) + 4 * date.resolution).replace(day=1)
     return render(request, "field/attendance.html", {"first": first, "projects": projects, "project": project, "data": data,
-                                                     "prev": prev, "next": nxt, "money": request.user.sees_payables})
+                                                     "prev": prev, "next": nxt, "money": request.user.sees_payables,
+                                                     "search": search})
 
 
 def _xlsx(request, first, project, data):
     from openpyxl import Workbook
-    from openpyxl.styles import Font
+    from openpyxl.styles import Font, PatternFill
     book = Workbook()
-    sheet = book.active
-    sheet.title = f"Công {first:%m-%Y}"
-    sheet.append([f"Bảng công tháng {first:%m/%Y}" + (f" · {project.code}" if project else " · các công trình được giao")])
-    head = ["Tên", "Tổ", "Loại", "Hình thức", "Công trình"] + [str(d) for d in data["days"]] + ["Tổng công", "Ngày làm việc"]
+    ws = book.active
+    ws.title = f"Công {first:%m-%Y}"
+    ws.append([f"Bảng công tháng {first:%m/%Y}" + (f" · {project.code}" if project else " · các công trình được giao")])
+    ws.append(["Khối văn phòng (giám sát) · khối công nhân (thợ công nhật có tên, tổ khoán theo số người) · tổ của chủ nhà "
+               "(không tính tiền). Ô ngày: số công; dòng \"Số người theo báo cáo\": số người."])
     money = request.user.sees_payables
+    head = ["Tên", "Mã / loại", "Công trình", "Tổng", "Ngày làm"] + [str(d) for d in data["days"]]
     if money:
         head += ["Đơn giá (₫)", "Thành tiền công nhật (₫)"]
-    sheet.append(head)
-    for cell in sheet[2]:
+    ws.append(head)
+    for cell in ws[3]:
         cell.font = Font(bold=True)
-    for row in data["rows"]:
-        values = [row["name"], row["team"], row.get("kind", "Giám sát"), row.get("pay", ""), row["projects"]]
-        values += [float(c) if c else None for c in row["cells"]] + [float(row["total"]), row["workdays"]]
-        if money:
-            values += [float(row["rate"]) if row.get("rate") is not None else None, float(row["cost"]) if "cost" in row else None]
-        sheet.append(values)
-    sheet.column_dimensions["A"].width = 24
+    band = PatternFill("solid", fgColor="DFE7DC")
+
+    def cells(values):
+        return [float(c) if c else None for c in values]
+
+    for section in data["sections"]:
+        ws.append([section["title"].upper()])
+        ws[ws.max_row][0].font = Font(bold=True, size=12)
+        for group in section["groups"]:
+            ws.append([group["title"]])
+            ws[ws.max_row][0].font = Font(bold=True)
+            for row in group["rows"]:
+                values = [row["name"], row.get("sub", ""), row["projects"], float(row["total"]), row["workdays"]] + cells(row["cells"])
+                if money:
+                    values += [float(row["rate"]) if row.get("rate") is not None else None,
+                               float(row["cost"]) if row.get("cost") is not None else None]
+                ws.append(values)
+            ws.append([f"Cộng {group['title']}", f"{group['people']} người có tên" if group["people"] else "", "",
+                       float(group["total"]), None] + cells(group["cells"]))
+            for cell in ws[ws.max_row]:
+                cell.fill, cell.font = band, Font(bold=True)
+        ws.append([f"TỔNG {section['title'].upper()}", "", "", float(section["total"]), None] + cells(section["cells"]))
+        ws[ws.max_row][0].font = Font(bold=True)
+        ws.append([])
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 28
     buffer = BytesIO()
     book.save(buffer)
     response = HttpResponse(buffer.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -130,6 +125,8 @@ def workers(request):
         return _add_worker(request, can_edit)
     if action == "trade":
         return _add_trade(request)
+    if action == "team":
+        return _save_team(request, can_edit)
     if request.method == "POST":
         if not can_edit:
             raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa nhân sự, đơn giá.")
@@ -166,10 +163,32 @@ def workers(request):
     people = Worker.objects.select_related("trade", "user").prefetch_related("rates").order_by("-active", "code")
     rows = [{"worker": w, "month": month_days.get(w.pk, ZERO), "rates": list(w.rates.all())[::-1] if user.sees_payables else []}
             for w in people]
+    from money.models import Party
+    teams = Team.objects.filter(project__in=projects_for(user)).select_related("project", "party").order_by(
+        "project__code", "kind", "name")
     return render(request, "field/workers.html", {"rows": rows, "can_edit": can_edit, "money": user.sees_payables, "first": first,
+                                                  "teams": teams, "team_kinds": Team.Kind.choices,
+                                                  "parties": Party.objects.filter(type=Party.Type.TEAM).order_by("name") if can_edit else [],
                                                   "pays": Worker.Pay.choices, "kinds": Worker.Kind.choices,
                                                   "trades": Trade.objects.filter(active=True), "today": timezone.localdate(),
                                                   "can_add": services.can_add_workers(user)})
+
+
+def _save_team(request, can_edit):
+    """Sửa loại tổ (khoán của ta / của chủ nhà), đối tượng tổ thợ trong sổ thu chi, đang làm — có nhật ký."""
+    from money.models import Party
+    if not can_edit:
+        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa tổ thợ.")
+    team = get_object_or_404(Team.objects.filter(project__in=projects_for(request.user)), pk=request.POST.get("id"))
+    party = Party.objects.filter(pk=request.POST.get("party") or 0, type=Party.Type.TEAM).first()
+    try:
+        services.set_team(request.user, team, kind=request.POST.get("kind"), party=party,
+                          clear_party=not request.POST.get("party"), active=request.POST.get("active") == "1")
+    except ValidationError as error:
+        messages.error(request, "; ".join(error.messages))
+    else:
+        messages.success(request, f"Đã lưu tổ {team.name} ({team.project.code}).")
+    return redirect("field_workers")
 
 
 def _add_trade(request):

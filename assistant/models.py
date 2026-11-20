@@ -50,10 +50,27 @@ class Feedback(models.Model):
         USER = "user", "Góp ý"
         FRICTION = "friction", "Chỗ vướng (tự ghi)"
 
+    class Topic(models.TextChoices):
+        PHOTO = "anh", "Hỏi ảnh của chi tiết nào"
+        PERSON = "ten_tho", "Hỏi tên thợ là ai"
+        TEAM = "to", "Hỏi tổ thợ (tổ mới, tên gần giống)"
+        NO_STAFF = "thieu_tho", "Báo cáo chưa có tên thợ"
+        REASON = "ly_do", "Hỏi lý do (báo giảm, sửa công)"
+        UNREAD = "chua_doc", "Phần tin bot chưa đọc được"
+        CODE = "ma", "Mã chi tiết không có trên bản vẽ"
+        VALUE = "thieu_so", "Việc có mã nhưng thiếu % hoặc khối lượng"
+        PROJECT = "cong_trinh", "Hỏi công trình nào"
+        PARTY = "doi_tuong", "Hỏi đối tượng thu chi"
+        DUPLICATE = "nghi_trung", "Hỏi phiếu nghi trùng"
+        NOT_UNDERSTOOD = "khong_hieu", "Bot không hiểu tin"
+        FAILED = "khong_ghi", "Phiếu không ghi được"
+
     kind = models.CharField(max_length=10, choices=Kind.choices, default=Kind.USER)
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
-    text = models.TextField("Nội dung", max_length=2000)
+    text = models.TextField("Nội dung (đã che số điện thoại)", max_length=2000)
     context = models.CharField("Ở đâu", max_length=200, blank=True)
+    topic = models.CharField("Loại chỗ vướng", max_length=12, choices=Topic.choices, blank=True)
+    project = models.ForeignKey(Project, verbose_name="Công trình", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

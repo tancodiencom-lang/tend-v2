@@ -1,22 +1,37 @@
 {% extends "base.html" %}{% load tend %}{% block title %}Bảng công {{ first|date:"m/Y" }}{% endblock %}
 {% block content %}
 <h1>Bảng công tháng {{ first|date:"m/Y" }}</h1>
-{% if user.sees_payables or user.role == "supervisor" %}<p><a class="btn plain" href="{% url 'field_workers' %}">Nhân sự (mã, nghề, đơn giá)</a></p>{% endif %}
-<p class="muted">Từ báo cáo ngày qua Telegram: giám sát gửi báo cáo là có mặt; thợ chấm theo tên. 8 giờ = 1 công. Sửa công: nhắn bot <b>/suacong</b> kèm lý do.</p>
+{% if user.sees_payables or user.role == "supervisor" %}<p><a class="btn plain" href="{% url 'field_workers' %}">Nhân sự và tổ thợ (mã, nghề, đơn giá, loại tổ)</a></p>{% endif %}
+<p class="muted">Từ báo cáo ngày qua Telegram. <b>Khối văn phòng</b>: giám sát gửi báo cáo là có mặt. <b>Khối công nhân</b>: thợ công nhật
+chấm theo tên (8 giờ = 1 công); tổ khoán ghi số người theo báo cáo, không cần tên. <b>Tổ của chủ nhà</b>: ghi để phối hợp, không tính tiền.
+Sửa công: nhắn bot <b>/suacong</b> kèm lý do.</p>
 <form method="get" class="filters">
   <a class="btn plain" href="?thang={{ prev|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}" aria-label="Tháng trước">‹</a>
   <input type="month" name="thang" value="{{ first|date:'Y-m' }}" aria-label="Tháng">
   <select name="cong_trinh" aria-label="Công trình"><option value="">Mọi công trình được giao</option>{% for p in projects %}<option value="{{ p.code }}"{% if p == project %} selected{% endif %}>{{ p.code }}</option>{% endfor %}</select>
+  <input type="search" name="tim" value="{{ search }}" placeholder="Tìm tên, mã NS, tổ…" aria-label="Tìm tên hoặc tổ">
   <button class="btn plain" type="submit">Xem</button>
   <a class="btn plain" href="?thang={{ next|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}" aria-label="Tháng sau">›</a>
-  <a class="btn" href="?thang={{ first|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}&tai=xlsx">Tải Excel</a>
+  <a class="btn" href="?thang={{ first|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}{% if search %}&tim={{ search|urlencode }}{% endif %}&tai=xlsx">Tải Excel</a>
 </form>
+{% if search %}<p>Đang lọc theo "<b>{{ search }}</b>" · <a href="?thang={{ first|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}">bỏ lọc</a></p>{% endif %}
 {% if money %}<section class="sum"><div><span>Chi phí công nhật ước tính</span><b>{{ data.cost|vnd }}</b></div>{% if data.missing %}<div><span>Thợ công nhật chưa có đơn giá</span><b class="missing">{{ data.missing|length }}</b><small>{{ data.missing|join:", " }}</small></div>{% endif %}</section>{% endif %}
-{% if not data.rows %}<p class="missing">Chưa có chấm công tháng này.</p>{% else %}
+<nav class="filters" aria-label="Đi tới khối">{% for s in data.sections %}<a class="btn plain" href="#{{ s.key }}">{{ s.title }} ({% if s.key == "van-phong" %}{{ s.count }} người{% elif s.key == "chu-nha" %}{{ s.teams }} tổ{% else %}{{ s.count }} người có tên{% if s.teams %}, {{ s.teams }} tổ khoán{% endif %}{% endif %})</a>{% endfor %}</nav>
+{% for s in data.sections %}
+<details class="box" id="{{ s.key }}" open><summary><h2 style="display:inline">{{ s.title }}</h2> · tổng {{ s.total|num }} {{ s.unit }}</summary>
+{% if s.note %}<p class="muted">{{ s.note }}</p>{% endif %}
+{% if not s.groups %}<p class="missing">Không có ai{% if search %} khớp "{{ search }}"{% endif %} trong tháng này.</p>{% else %}
 <div class="scroll"><table class="grid sheet">
-<thead><tr><th class="code">Tên</th><th>Tổ</th><th class="n">Tổng công</th><th class="n">Ngày làm</th>{% if money %}<th class="n">Đơn giá</th><th class="n">Thành tiền</th>{% endif %}{% for d in data.days %}<th class="d{% if d in data.weekend %} we{% endif %}">{{ d }}</th>{% endfor %}</tr></thead>
-<tbody>{% for r in data.rows %}<tr><td class="code">{{ r.name }}<br><small class="muted">{% if r.staff %}giám sát · có mặt {{ r.presence }} lượt{% else %}{{ r.kind|lower }} · {{ r.pay|lower }}{% endif %}</small></td><td>{{ r.team }}</td>
-<td class="n"><b>{{ r.total|num }}</b></td><td class="n">{{ r.workdays }}</td>{% if money %}<td class="n">{% if r.staff %}—{% elif r.pay == "Tổ khoán" %}khoán{% else %}{{ r.rate|vnd|default:"thiếu" }}{% endif %}</td><td class="n">{% if r.cost is not None %}{{ r.cost|vnd }}{% else %}—{% endif %}</td>{% endif %}
-{% for c in r.cells %}<td class="d{% if forloop.counter in data.weekend %} we{% endif %}">{% if c %}{{ c|num }}{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+<thead><tr><th class="code">Tên</th><th>Công trình</th><th class="n">Tổng</th><th class="n">Ngày làm</th>{% if money %}<th class="n">Đơn giá</th><th class="n">Thành tiền</th>{% endif %}{% for d in data.days %}<th class="d{% if d in data.weekend %} we{% endif %}">{{ d }}</th>{% endfor %}</tr></thead>
+{% for g in s.groups %}<tbody>
+<tr class="floor"><th colspan="{% if money %}6{% else %}4{% endif %}">{{ g.title }} · {% if g.people %}{{ g.people }} người có tên{% else %}theo số người báo{% endif %}{% if g.note %} <small class="muted">— {{ g.note }}</small>{% endif %}</th>{% for d in data.days %}<th class="d{% if d in data.weekend %} we{% endif %}"></th>{% endfor %}</tr>
+{% for r in g.rows %}<tr><td class="code">{{ r.name }}<br><small class="muted">{{ r.sub }}{% if r.work %} · {{ r.work }}{% endif %}</small></td><td>{{ r.projects }}</td>
+<td class="n"><b>{{ r.total|num }}</b> <small>{{ r.unit }}</small></td><td class="n">{{ r.workdays }}</td>{% if money %}<td class="n">{% if r.staff or r.crew_of %}—{% elif r.pay == "Tổ khoán" %}khoán{% elif r.pay == "Lương tháng" %}lương tháng{% else %}{{ r.rate|vnd|default:"thiếu" }}{% endif %}</td><td class="n">{% if r.cost is not None %}{{ r.cost|vnd }}{% else %}—{% endif %}</td>{% endif %}
+{% for c in r.cells %}<td class="d{% if forloop.counter0|add:data.days.0 in data.weekend %} we{% endif %}">{% if c %}{{ c|num }}{% endif %}</td>{% endfor %}</tr>{% endfor %}
+<tr class="subtotal"><td class="code"><b>Cộng {{ g.title }}</b></td><td></td><td class="n"><b>{{ g.total|num }}</b></td><td></td>{% if money %}<td></td><td></td>{% endif %}{% for c in g.cells %}<td class="d"><b>{% if c %}{{ c|num }}{% endif %}</b></td>{% endfor %}</tr>
+</tbody>{% endfor %}
+<tfoot><tr class="subtotal"><td class="code"><b>TỔNG {{ s.title|upper }}</b></td><td></td><td class="n"><b>{{ s.total|num }}</b></td><td></td>{% if money %}<td></td><td></td>{% endif %}{% for c in s.cells %}<td class="d"><b>{% if c %}{{ c|num }}{% endif %}</b></td>{% endfor %}</tr></tfoot>
 </table></div>{% endif %}
+</details>
+{% endfor %}
 {% endblock %}

@@ -30,7 +30,14 @@ Việc của bạn:
    Chấm công: liệt kê từng người được nêu tên trong people (tên đúng như người dùng viết; "nửa ngày" → days 0.5;
    "4 tiếng/4h/4 giờ" → hours 4; không nói gì → cả ngày). Người báo cáo (giám sát) tự có công, không đưa vào people.
    Nếu người dùng nói tổ của người đó thì ghi team; nói "thợ phụ"/"phụ" hay "thợ chính"/"thợ" thì ghi kind (phu/tho), không
-   đưa chữ đó vào tên. Không tự bịa tên, không gộp người.
+   đưa chữ đó vào tên. Không tự bịa tên, không gộp người. Thợ CÔNG NHẬT phải có tên trong people. Tổ khoán và tổ của chủ
+   nhà không cần tên: số người theo tổ ("tổ xây: 3 thợ 2 phụ", "tổ điện của chủ nhà 2 người đi dây") ghi vào crews (team
+   là tên tổ như người báo viết, bỏ chữ "tổ"; skilled thợ, helpers phụ, others khi chỉ nói "người"; owner true nếu là tổ của
+   chủ nhà/chủ đầu tư; work nếu nói việc tổ làm). Không rõ tổ nào ("3 thợ 2 phụ") thì team để trống.
+   Việc đã làm KHÔNG có mã trên bản vẽ (find_details không thấy, vd "cắt đục sàn mái") thì ghi vào extra (floor "Tầng 5"/"Mái",
+   description đúng lời người báo, percent nếu có), không ép gắn mã. Phần "dự kiến", "kế hoạch", "ngày mai" là KẾ HOẠCH,
+   không phải việc đã làm: ghi vào plan (date YYYY-MM-DD nếu có, lines: code nếu có mã, floor, description), không đưa vào
+   lines/extra. work_date lấy ngày ghi trong báo cáo ("báo cáo 19/11") nếu có.
 2. Sửa chấm công đã gửi ("sửa công Hùng hôm qua thành nửa ngày vì về sớm"): gọi propose_attendance_fix, phải có lý do;
    thiếu lý do thì ask_user.
 3. Trả lời một YÊU CẦU BÁO CÁO không phải về tiến độ (xem pending_asks): gọi propose_answer.
@@ -92,6 +99,21 @@ TOOLS = [
                                                     "hours": {"type": "number"}, "team": {"type": "string"},
                                                     "kind": {"type": "string", "enum": ["tho", "phu"],
                                                              "description": "Chỉ khi người dùng nói rõ: thợ chính/thợ → tho; thợ phụ/phụ → phu"}}}},
+                          "extra": {"type": "array", "description": "Việc đã làm ngoài bản vẽ (không có mã), không tính % tiến độ",
+                                    "items": {"type": "object", "additionalProperties": False, "required": ["description"],
+                                              "properties": {"floor": {"type": "string"}, "description": {"type": "string"},
+                                                             "percent": {"type": "number"}}}},
+                          "plan": {"type": "object", "additionalProperties": False, "required": ["lines"],
+                                   "description": "Việc dự kiến (kế hoạch ngày mai), không phải việc đã làm",
+                                   "properties": {"date": {"type": "string", "description": "YYYY-MM-DD; bỏ trống là ngày làm việc kế tiếp"},
+                                                  "lines": {"type": "array", "items": {
+                                                      "type": "object", "additionalProperties": False, "required": ["description"],
+                                                      "properties": {"code": {"type": "string"}, "floor": {"type": "string"},
+                                                                     "description": {"type": "string"}}}}}},
+                          "crews": {"type": "array", "description": "Số người theo tổ (tổ khoán, tổ của chủ nhà), không tên",
+                                    "items": {"type": "object", "additionalProperties": False, "properties": {
+                                        "team": {"type": "string"}, "skilled": {"type": "integer"}, "helpers": {"type": "integer"},
+                                        "others": {"type": "integer"}, "owner": {"type": "boolean"}, "work": {"type": "string"}}}},
                           "note": {"type": "string"}}}},
     {"name": "propose_attendance_fix", "description": "Lập phiếu sửa chấm công một người (đặt lại số công; 0 là bỏ công).",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["project_code", "work_date", "name", "reason"],

@@ -16,11 +16,13 @@ from core.models import Role
 from drawings.models import Item
 from projects.models import Project, projects_for
 
-from .models import Attendance, Photo, Report, ReportLine, Trade, Worker, WorkerRate
+from . import crews as crew_lookup
+from .models import Attendance, Crew, ExtraWork, Photo, PlanLine, Report, ReportLine, Team, Trade, Worker, WorkerRate
 
 HOURS_PER_DAY = Decimal(8)
 HUNDRED = Decimal(100)
 MAX_DAYS_BACK = 31
+PLAN_DAYS_AHEAD = 31
 
 
 def days_from(days=None, hours=None):
@@ -107,6 +109,44 @@ def add_worker(user, name, team="", kind=Worker.Kind.SKILLED, channel="telegram"
     return record_save(worker, user, f"Thêm nhân sự {worker.code}", channel=channel)
 
 
+@transaction.atomic
+def add_team(user, project, name, kind=None, channel="telegram"):
+    """Thêm tổ thợ ở công trình (bot hỏi "tổ khoán của ta / tổ của chủ nhà" khi gặp tổ mới). Trùng tên (bỏ dấu) thì dùng tổ có sẵn."""
+    if not can_add_workers(user):
+        raise PermissionDenied("Anh/chị không được thêm tổ thợ.")
+    name = crew_lookup.clean_name(name)
+    if not name:
+        raise ValidationError("Thiếu tên tổ.")
+    found = crew_lookup.match_team(name, project, Team.objects.select_for_update().filter(project=project))
+    if found.get("team"):
+        return found["team"]
+    team = Team(project=project, name=name, kind=kind if kind in Team.Kind.values else Team.Kind.CONTRACT, created_by=user)
+    return record_save(team, user, f"Thêm tổ thợ {name} ({team.get_kind_display().lower()})", channel=channel)
+
+
+@transaction.atomic
+def set_team(user, team, *, kind=None, party=None, clear_party=False, active=None, channel="web"):
+    """Giám đốc, kế toán nội bộ sửa loại tổ, đối tượng trong sổ thu chi (tổ khoán), đang làm."""
+    if not can_set_rates(user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ sửa tổ thợ.")
+    team = Team.objects.select_for_update().get(pk=team.pk)
+    changes = []
+    if kind in Team.Kind.values and kind != team.kind:
+        team.kind = kind
+        changes.append("loại")
+    if party is not None and party.type != "to":
+        raise ValidationError("Chỉ gắn với đối tượng loại Tổ thợ.")
+    if (party is not None and party.pk != team.party_id) or (clear_party and team.party_id):
+        team.party = None if clear_party else party
+        changes.append("đối tượng thu chi")
+    if active is not None and active != team.active:
+        team.active = active
+        changes.append("đang làm")
+    if changes:
+        record_save(team, user, f"Sửa tổ {team.name}: " + ", ".join(changes), channel=channel)
+    return team
+
+
 def next_code():
     """NS-0001, NS-0002…: số lớn nhất đã cấp (kể cả người đã nghỉ) + 1; khoá các dòng để hai người thêm cùng lúc không trùng."""
     last = 0
@@ -185,10 +225,27 @@ def set_worker(user, worker, *, day_rate=None, pay=None, team=None, kind=None, a
     return worker
 
 
+def _plan_date(value, work_date):
+    day = value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+    if day <= work_date:
+        raise ValidationError(f"Ngày dự kiến {day:%d/%m/%Y} phải sau ngày báo cáo {work_date:%d/%m/%Y}.")
+    if (day - work_date).days > PLAN_DAYS_AHEAD:
+        raise ValidationError(f"Kế hoạch chỉ ghi trong {PLAN_DAYS_AHEAD} ngày tới.")
+    return day
+
+
+def _text(value, size):
+    return " ".join(str(value or "").split())[:size]
+
+
 @transaction.atomic
 def submit_report(user, project, payload, photos=(), client_key=None, channel="telegram"):
     """payload: {work_date, note, lines: [{item_id, percent | quantity, note, reason}],
-    attendance: [{worker_id | new: {name, team, kind}, days, reason}]}; photos: [(File, item_id | None)].
+    extra: [{floor, description, percent?}] (việc ngoài bản vẽ, không tính % tiến độ),
+    plan: {date, lines: [{item_id?, floor, description}]} (việc dự kiến, thường ngày mai),
+    crews: [{team_id | new: {name, kind} | (không có: chưa rõ tổ), skilled, helpers, others, work}] (số người theo tổ, không tên),
+    attendance: [{worker_id | new: {name, team, kind}, days, reason}], via, asked, named (dữ kiện chấm mức đầy đủ)};
+    photos: [(File, item_id | None)].
 
     Gửi lại cùng `client_key` trả báo cáo đã ghi, không ghi lần hai. Trả Report.
     """
@@ -201,11 +258,21 @@ def submit_report(user, project, payload, photos=(), client_key=None, channel="t
     work_date = _work_date(payload.get("work_date"))
     lines = payload.get("lines") or []
     attendance = payload.get("attendance") or []
-    if not lines and not attendance and not payload.get("note") and not photos:
+    extra = [e for e in payload.get("extra") or [] if _text(e.get("description"), 500)]
+    plan = payload.get("plan") or {}
+    plan_lines = [p for p in plan.get("lines") or [] if _text(p.get("description"), 500)]
+    crew_rows = payload.get("crews") or []
+    if not lines and not attendance and not extra and not plan_lines and not crew_rows and not payload.get("note") and not photos:
         raise ValidationError("Báo cáo trống.")
-    items = {i.pk: i for i in Item.objects.filter(project=project, active=True, pk__in=[l.get("item_id") for l in lines])}
+    plan_day = _plan_date(plan.get("date"), work_date) if plan_lines else None
+    wanted = [l.get("item_id") for l in lines] + [p.get("item_id") for p in plan_lines if p.get("item_id")]
+    items = {i.pk: i for i in Item.objects.filter(project=project, active=True, pk__in=wanted)}
+    via = payload.get("via") if payload.get("via") in Report.Via.values else ""
+    named = payload.get("named")
     report = record_save(Report(project=project, author=user, work_date=work_date, note=str(payload.get("note") or "")[:5000],
-                                channel=channel, client_key=client_key), user, "Gửi báo cáo ngày", channel=channel)
+                                channel=channel, client_key=client_key, via=via, asked=min(int(payload.get("asked") or 0), 999),
+                                named=None if named is None else min(int(named), 999)),
+                         user, "Gửi báo cáo ngày", channel=channel)
     by_item = {}
     for line in lines:
         item = items.get(line.get("item_id"))
@@ -226,6 +293,31 @@ def submit_report(user, project, payload, photos=(), client_key=None, channel="t
                                      note=str(line.get("note") or "")[:2000], decrease_reason=reason), user, "Dòng báo cáo",
                           channel=channel)
         by_item[item.pk] = row
+    for entry in extra:
+        percent = entry.get("percent")
+        percent = Decimal(str(percent)) if percent not in (None, "") else None
+        if percent is not None and not 0 <= percent <= 100:
+            raise ValidationError("Phần trăm của việc ngoài bản vẽ phải từ 0 đến 100.")
+        record_save(ExtraWork(report=report, floor=_text(entry.get("floor"), 60), description=_text(entry.get("description"), 500),
+                              percent=percent), user, "Việc ngoài bản vẽ", channel=channel)
+    for entry in crew_rows:
+        counts = [int(entry.get(k) or 0) for k in ("skilled", "helpers", "others")]
+        if any(not 0 <= c <= 500 for c in counts) or not sum(counts):
+            raise ValidationError("Số người của tổ phải từ 1 đến 500.")
+        team = None
+        if entry.get("new"):
+            team = add_team(user, project, entry["new"].get("name"), entry["new"].get("kind"), channel=channel)
+        elif entry.get("team_id"):
+            team = Team.objects.filter(pk=entry["team_id"], project=project).first()
+            if team is None:
+                raise ValidationError("Tổ trong phiếu không còn ở công trình này.")
+        record_save(Crew(report=report, team=team, skilled=counts[0], helpers=counts[1], others=counts[2],
+                         work=_text(entry.get("work"), 300)), user, "Số người theo tổ", channel=channel)
+    for entry in plan_lines:
+        item = items.get(entry.get("item_id")) if entry.get("item_id") else None
+        record_save(PlanLine(report=report, for_date=plan_day, item=item, floor=_text(entry.get("floor"), 60),
+                             description=_text(entry.get("description"), 500)), user, f"Việc dự kiến {plan_day:%d/%m/%Y}",
+                    channel=channel)
     for file, item_id in photos:
         photo = Photo(report=report, line=by_item.get(item_id))
         photo.image.save(getattr(file, "name", "anh.jpg"), file, save=False)

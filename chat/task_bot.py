@@ -206,10 +206,12 @@ def callback(link_row, kind, value, state_set):
     return "Không rõ thao tác."
 
 
-def friction(user, text, context):
-    """Ghi chỗ người dùng vướng (bot không hiểu, AI lỗi, phiếu không ghi được) để báo cáo cải tiến."""
+def friction(user, text, context, topic="", project=None):
+    """Ghi chỗ người dùng vướng (bot phải hỏi lại, không hiểu, phiếu không ghi được) để thống kê cải tiến.
+    Không bao giờ làm hỏng việc chính: lỗi ghi chỗ vướng thì bỏ qua (điểm lưu riêng, không huỷ giao dịch ngoài)."""
     try:
-        tasks.add_feedback(user, text, kind=Feedback.Kind.FRICTION, context=context)
+        with transaction.atomic():
+            tasks.add_feedback(user, text, kind=Feedback.Kind.FRICTION, context=context, topic=topic, project=project)
     except ValidationError:
         pass
 

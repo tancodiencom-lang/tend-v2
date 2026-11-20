@@ -18,6 +18,20 @@ Lương tháng (giám sát…) chia vào công trình theo tỷ lệ ngày có m
 {% if user.is_director %}<form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="trade">
   <label>Thêm nghề vào danh mục <input type="text" name="trade_name" placeholder="vd Thợ hàn"></label><button class="btn plain" type="submit">Thêm nghề</button>
 </form>{% endif %}</details>{% endif %}
+<h2>Tổ thợ theo công trình</h2>
+<p class="muted"><b>Tổ khoán của công ty</b>: báo cáo chỉ cần tên tổ + số người (vd "tổ xây: 3 thợ 2 phụ"), tiền nằm ở khoản khoán; số công
+theo tổ để dự đoán chi phí nhân công sau. <b>Tổ của chủ nhà</b> (chủ nhà ký trực tiếp, vd tổ điện): ghi số người + việc để phối hợp, không
+tính chi phí. Thợ <b>công nhật</b> không phải tổ: ghi tên từng người. Tổ mới do bot hỏi giám sát khi gặp lần đầu.</p>
+{% if teams %}<div class="scroll"><table class="grid"><thead><tr><th>Công trình</th><th>Tổ</th><th>Loại</th><th>Đối tượng trong sổ thu chi</th><th>Trạng thái</th>{% if can_edit %}<th>Sửa</th>{% endif %}</tr></thead><tbody>
+{% for t in teams %}<tr><td>{{ t.project.code }}</td><td>Tổ {{ t.name }}</td>
+{% if can_edit %}<td colspan="4"><form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="team"><input type="hidden" name="id" value="{{ t.pk }}">
+  <label>Loại <select name="kind">{% for v, l in team_kinds %}<option value="{{ v }}"{% if v == t.kind %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+  <label>Đối tượng tổ thợ (tiền khoán) <select name="party"><option value="">— chưa gắn —</option>{% for p in parties %}<option value="{{ p.pk }}"{% if p.pk == t.party_id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></label>
+  <label class="check"><input type="checkbox" name="active" value="1"{% if t.active %} checked{% endif %}> Đang làm</label>
+  <button class="btn" type="submit">Lưu</button></form></td>
+{% else %}<td>{% if t.kind == "chu_nha" %}● {% else %}▲ {% endif %}{{ t.get_kind_display }}</td><td>{{ t.party.name|default:"—" }}</td><td>{% if t.active %}Đang làm{% else %}▼ Thôi{% endif %}</td>{% endif %}</tr>{% endfor %}
+</tbody></table></div>{% else %}<p class="muted">Chưa có tổ nào. Giám sát nhắn "tổ xây: 3 thợ 2 phụ" trong báo cáo, bot sẽ hỏi loại tổ một lần.</p>{% endif %}
+<h2>Nhân sự có tên</h2>
 <div class="cards">{% for r in rows %}{% with w=r.worker %}
 <section class="card worker{% if not w.active %} off{% endif %}"><header><b>{{ w.code|default:"(chưa có mã)" }} · {{ w.name }}</b>
   <span class="muted">{{ w.trade.name|default:"" }}{% if w.user %} · tài khoản {{ w.user.username }}{% endif %} · {{ r.month|num }} công tháng {{ first|date:"m/Y" }}{% if not w.active %} · ▼ đã nghỉ{% endif %}</span></header>

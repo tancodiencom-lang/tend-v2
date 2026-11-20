@@ -13,6 +13,11 @@ from projects.models import Project
 
 
 class Report(models.Model):
+    class Via(models.TextChoices):
+        SHORT = "ngan", "Cú pháp ngắn"
+        FREE = "tu_do", "Nhắn tự do (bot đọc)"
+        AI = "ai", "Nhắn tự do (AI đọc)"
+
     project = models.ForeignKey(Project, verbose_name="Công trình", on_delete=models.PROTECT, related_name="reports")
     author = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="Người báo", on_delete=models.PROTECT, related_name="reports")
     work_date = models.DateField("Ngày công việc")
@@ -20,6 +25,10 @@ class Report(models.Model):
     channel = models.CharField("Kênh", max_length=20, default="telegram")
     client_key = models.UUIDField("Mã chống gửi trùng", unique=True)
     created_at = models.DateTimeField("Gửi lúc", auto_now_add=True)
+    # Dữ kiện để chấm mức đầy đủ (field/quality.py tính điểm lúc đọc). Báo cáo trước đợt 8a: via trống, named None.
+    via = models.CharField("Cách nhắn", max_length=8, choices=Via.choices, blank=True)
+    asked = models.PositiveSmallIntegerField("Số lần bot phải hỏi lại", default=0)
+    named = models.PositiveSmallIntegerField("Số người có tên trong phiếu", null=True, blank=True)
 
     class Meta:
         verbose_name = "Báo cáo ngày"
@@ -40,6 +49,92 @@ class ReportLine(models.Model):
         verbose_name_plural = "Dòng báo cáo"
         constraints = [models.CheckConstraint(condition=models.Q(percent__isnull=False) | models.Q(quantity__isnull=False),
                                               name="report_line_has_value")]
+
+
+class ExtraWork(models.Model):
+    """Việc ngoài bản vẽ ghi trong báo cáo (vd "cắt đục sàn mái"): công trình theo báo cáo, tầng, mô tả. Không gắn mã chi
+    tiết, không tính vào % tiến độ; hiện trong báo cáo ngày và báo cáo tháng."""
+    report = models.ForeignKey(Report, on_delete=models.PROTECT, related_name="extra_work")
+    floor = models.CharField("Tầng", max_length=60, blank=True)
+    description = models.CharField("Việc", max_length=500)
+    percent = models.DecimalField("% tự báo (không tính tiến độ)", max_digits=5, decimal_places=1, null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Việc ngoài bản vẽ"
+        verbose_name_plural = "Việc ngoài bản vẽ"
+        ordering = ["report", "pk"]
+
+    def __str__(self):
+        return f"{self.floor + ': ' if self.floor else ''}{self.description}"
+
+
+class Team(models.Model):
+    """Tổ thợ ở một công trình (loại tổ theo hợp đồng từng công trình nên mỗi công trình một danh sách).
+
+    Tổ khoán của công ty: báo cáo ghi số người theo ngày, không cần tên (tiền nằm ở khoản khoán; số công để dự đoán chi
+    phí nhân công sau). Tổ của chủ nhà (chủ nhà ký trực tiếp, vd tổ điện): ghi số người + việc để phối hợp, không tính chi
+    phí. Thợ công nhật không phải tổ: vẫn ghi tên từng người (Attendance)."""
+
+    class Kind(models.TextChoices):
+        CONTRACT = "khoan", "Tổ khoán của công ty"
+        OWNER = "chu_nha", "Tổ của chủ nhà"
+
+    project = models.ForeignKey(Project, verbose_name="Công trình", on_delete=models.PROTECT, related_name="teams")
+    name = models.CharField("Tên tổ", max_length=100)
+    kind = models.CharField("Loại tổ", max_length=8, choices=Kind.choices, default=Kind.CONTRACT)
+    party = models.ForeignKey("money.Party", verbose_name="Đối tượng trong sổ thu chi (tổ khoán)", on_delete=models.PROTECT,
+                              null=True, blank=True, related_name="site_teams")
+    active = models.BooleanField("Đang làm", default=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Tổ thợ"
+        verbose_name_plural = "Tổ thợ"
+        ordering = ["project", "kind", "name"]
+        constraints = [models.UniqueConstraint(fields=["project", "name"], name="team_name_once_per_project")]
+
+    def __str__(self):
+        return f"tổ {self.name}"
+
+
+class Crew(models.Model):
+    """Số người một tổ có mặt theo một báo cáo ngày (không tên). Cùng công trình, ngày, tổ có nhiều báo cáo thì lấy báo
+    cáo mới nhất (field/crews.py). `team` trống: tin chỉ ghi "3 thợ 2 phụ" mà không rõ tổ nào."""
+    report = models.ForeignKey(Report, on_delete=models.PROTECT, related_name="crews")
+    team = models.ForeignKey(Team, verbose_name="Tổ", on_delete=models.PROTECT, null=True, blank=True, related_name="crews")
+    skilled = models.PositiveSmallIntegerField("Thợ", default=0)
+    helpers = models.PositiveSmallIntegerField("Phụ", default=0)
+    others = models.PositiveSmallIntegerField("Người (không rõ thợ/phụ)", default=0)
+    work = models.CharField("Việc tổ làm", max_length=300, blank=True)
+
+    class Meta:
+        verbose_name = "Số người theo tổ"
+        verbose_name_plural = "Số người theo tổ"
+        ordering = ["report", "pk"]
+        constraints = [models.CheckConstraint(condition=models.Q(skilled__gt=0) | models.Q(helpers__gt=0) | models.Q(others__gt=0),
+                                              name="crew_has_people")]
+
+    @property
+    def total(self):
+        return self.skilled + self.helpers + self.others
+
+
+class PlanLine(models.Model):
+    """Một việc dự kiến (thường cho ngày mai) ghi trong báo cáo. Ngày đó so với việc thực làm (field/plans.py, tính lúc đọc)."""
+    report = models.ForeignKey(Report, on_delete=models.PROTECT, related_name="plan_lines")
+    for_date = models.DateField("Dự kiến làm ngày", db_index=True)
+    item = models.ForeignKey(Item, verbose_name="Chi tiết", on_delete=models.PROTECT, null=True, blank=True, related_name="plan_lines")
+    floor = models.CharField("Tầng", max_length=60, blank=True)
+    description = models.CharField("Việc", max_length=500)
+
+    class Meta:
+        verbose_name = "Việc dự kiến"
+        verbose_name_plural = "Việc dự kiến"
+        ordering = ["for_date", "report", "pk"]
+
+    def __str__(self):
+        return f"{self.floor + ': ' if self.floor else ''}{self.description}"
 
 
 def photo_path(instance, filename):

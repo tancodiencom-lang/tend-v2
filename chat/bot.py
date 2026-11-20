@@ -7,7 +7,7 @@ thợ đã rõ người (hoặc đã chọn thêm mới), chấm công khác s�
 import hashlib
 import re
 import secrets
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -21,13 +21,16 @@ from django.utils import timezone
 
 from asks import services as asks
 from asks.models import Ask
+from assistant.models import Feedback
 from core.audit import record_save
 from core.models import User
 from core.text import phone as phone_digits
 from core.text import vn_number
 from drawings.models import Item
+from field import crews as crew_lookup
+from field import plans, quality
 from field import services as field
-from field.models import Attendance, Worker
+from field.models import Attendance, Report, Team, Worker
 from field.workers import match, recent_for
 from projects.models import Project
 
@@ -45,6 +48,8 @@ HELP = ("Tend qua Telegram:\n"
         "• Báo cáo + chấm công: gửi ảnh rồi nhắn, ví dụ \"TN-22 T2.5 40%, S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; "
         "Tâm 4 giờ\". Anh/chị gửi báo cáo là tự có công tại công trình đó. Bot lập phiếu, bấm Xác nhận mới ghi.\n"
         "• Ảnh cho từng chi tiết: chú thích ảnh ghi mã (vd T2.5); ảnh không chú thích bot sẽ hỏi.\n"
+        "• Việc ngoài bản vẽ ghi mỗi việc một dòng sau dấu + (vd \"+ Cắt đục sàn mái\"), không tính % tiến độ. Kế hoạch ngày "
+        "mai: dòng \"Dự kiến 21/11: Trát tường tầng 4; Đánh lạnh tầng 5\"; hôm sau bot so với việc thực làm.\n"
         "• Hỏi: \"TN-22 đang chậm bao nhiêu?\", \"tháng này Hùng bao nhiêu công?\"\n"
         "• Lệnh: /tongquan, /cong (công tháng này), /yeucau, /congtrinh, /suacong TN-22 17/11 Hùng 0,5 lý do …, "
         "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup\n"
@@ -189,6 +194,88 @@ def _work_date(data):
     return field._work_date(raw or None)
 
 
+def _ask(proposal, topic, text, key=None, log=True, count=True):
+    """Bot phải hỏi lại người gửi: đếm vào phiếu (mức đầy đủ của báo cáo) và ghi chỗ vướng để thống kê. Mỗi `key` một lần.
+    `log=False`: chỗ vướng đã ghi lúc hỏi (trước khi có phiếu), chỉ đếm. `count=False`: câu hỏi khai báo lần đầu (tổ mới),
+    ghi chỗ vướng nhưng không trừ điểm báo cáo."""
+    asks = list(proposal.payload.get("asks") or [])
+    key = key or f"{topic}:{len(asks)}"
+    if any(a.get("key") == key for a in asks):
+        return
+    asks.append({"topic": topic, "key": key, **({} if count else {"count": False})})
+    proposal.payload = {**proposal.payload, "asks": asks}
+    proposal.save(update_fields=["payload"])
+    if log:
+        task_bot.friction(proposal.link.user, text, f"bot hỏi lại · phiếu {proposal.get_kind_display().lower()}", topic=topic,
+                          project=proposal.project)
+
+
+def item_codes(project):
+    return Item.objects.filter(project=project, active=True).values_list("code", flat=True)
+
+
+def _plan(project, items, work_date, data):
+    """Phần "dự kiến" của tin → {date, lines: [{item_id?, code?, floor, description}]} (không có ngày: ngày làm việc kế tiếp)."""
+    plan = data.get("plan") or {}
+    rows = []
+    for line in plan.get("lines") or []:
+        description = " ".join(str(line.get("description") or line.get("code") or "").split())[:500]
+        if not description:
+            continue
+        item = items.get(str(line.get("code") or "").strip().casefold())
+        rows.append({"item_id": item.pk if item else None, "code": item.code if item else "", "floor": str(line.get("floor") or "")[:60]
+                     or (item.floor if item else ""), "description": description})
+    if not rows:
+        return None
+    day = date.fromisoformat(str(plan["date"])[:10]) if plan.get("date") else plans.next_workday(work_date)
+    if day < work_date and (work_date - day).days > 300:      # "dự kiến 02/01" trong báo cáo 31/12: năm sau
+        day = day.replace(year=day.year + 1)
+    day = field._plan_date(day, work_date)
+    return {"date": day.isoformat(), "lines": rows}
+
+
+def _team_label(team):
+    return f"tổ {team.name} ({'của chủ nhà' if team.kind == Team.Kind.OWNER else 'khoán của ta'})"
+
+
+def _crew(row, project, can_add):
+    """Một nhóm "tổ xây: 3 thợ 2 phụ" → dòng số người theo tổ trong phiếu: rõ tổ / hỏi (gần giống) / tổ mới (hỏi loại) /
+    chưa rõ tổ (tin không ghi tên tổ). Tổ mới mà tin ghi "của chủ nhà" thì lập sẵn tổ của chủ nhà, không hỏi."""
+    counts = {k: max(0, min(500, int(row.get(k) or 0))) for k in ("skilled", "helpers", "others")}
+    if not sum(counts.values()):
+        return None
+    name = crew_lookup.clean_name(row.get("team"))
+    entry = {"name": name, **counts, "work": " ".join(str(row.get("work") or "").split())[:300], "owner": bool(row.get("owner"))}
+    if not name:
+        entry["status"] = "none"
+        return entry
+    found = crew_lookup.match_team(name, project)
+    if found.get("team"):
+        entry.update(status="ok", team_id=found["team"].pk, label=_team_label(found["team"]), kind=found["team"].kind)
+    elif found.get("candidates"):
+        entry.update(status="ask", candidates=[{"id": t.pk, "label": _team_label(t)} for t in found["candidates"]])
+    elif entry["owner"] and can_add:
+        entry.update(status="new_ok", new={"name": name, "kind": Team.Kind.OWNER}, label=f"tổ {name} (của chủ nhà, tổ mới)",
+                     kind=Team.Kind.OWNER)
+    else:
+        entry["status"] = "new"
+    return entry
+
+
+def unresolved_teams(proposal):
+    return [(i, c) for i, c in enumerate(proposal.payload.get("crews") or []) if c.get("status") in ("ask", "new")]
+
+
+def crew_line(row):
+    """"tổ xây (khoán của ta): 5 người (3 thợ, 2 phụ) · đi dây tầng 3"."""
+    total = row["skilled"] + row["helpers"] + row["others"]
+    parts = [f"{row['skilled']} thợ" if row["skilled"] else "", f"{row['helpers']} phụ" if row["helpers"] else ""]
+    detail = ", ".join(x for x in parts if x)
+    who = {"ok": row.get("label"), "new_ok": row.get("label"), "none": "chưa rõ tổ nào"}.get(row["status"]) or f"tổ \"{row['name']}\" ?"
+    text = f"{who}: {total} người" + (f" ({detail})" if detail and (row["helpers"] or row["others"]) else "")
+    return text + (f" · {row['work']}" if row.get("work") else "")
+
+
 def build_report(link_row, data, source_text):
     user = link_row.user
     project = reads.project(user, data.get("project_code"))
@@ -206,7 +293,8 @@ def build_report(link_row, data, source_text):
         quantity = line.get("quantity") if percent in (None, "") else None
         if percent not in (None, "") and not 0 <= float(percent) <= 100:
             raise ValidationError(f"Phần trăm của {item.code} phải từ 0 đến 100.")
-        entry = {"item_id": item.pk, "code": item.code, "work": item.work, "unit": item.unit,
+        entry = {"item_id": item.pk, "code": item.code, "work": item.work, "unit": item.unit, "floor": item.floor,
+                 "location": item.location,
                  "percent": percent if percent not in (None, "") else None, "quantity": quantity,
                  "note": str(line.get("note") or "")[:2000], "reason": str(line.get("reason") or "").strip()[:1000]}
         before = field.decrease_from(item, Decimal(str(percent)) if entry["percent"] is not None else None,
@@ -215,19 +303,49 @@ def build_report(link_row, data, source_text):
             entry["decrease_from"] = vn_number(before.quantize(Decimal("0.1")))
         lines.append(entry)
     if unknown:
-        raise ValidationError("Không thấy chi tiết " + ", ".join(unknown) + f" trên bản vẽ {project.code}. Nhắn lại đúng mã (vd T2.5).")
+        task_bot.friction(user, f"Mã {', '.join(unknown)} không có trên bản vẽ {project.code}: {source_text}",
+                          "bot hỏi lại · phiếu báo cáo ngày", topic=Feedback.Topic.CODE, project=project)
+        raise ValidationError("Không thấy chi tiết " + ", ".join(unknown) + f" trên bản vẽ {project.code}. Nhắn lại đúng mã (vd T2.5). "
+                              f"Tra mã: {settings.APP_URL}/ban-ve/{project.code}/khoi-luong/")
+    extra = []
+    for row in data.get("extra") or []:
+        description = " ".join(str(row.get("description") or "").split())[:500]
+        if not description:
+            continue
+        percent = row.get("percent")
+        if percent not in (None, "") and not 0 <= float(percent) <= 100:
+            raise ValidationError(f"Phần trăm của việc \"{description[:60]}\" phải từ 0 đến 100.")
+        item = items.get(str(row.get("code") or "").strip().casefold())
+        extra.append({"floor": str(row.get("floor") or "")[:60], "description": description,
+                      "percent": percent if percent not in (None, "") else None, **({"code": item.code} if item else {})})
+    plan = _plan(project, items, work_date, data)
     can_add = field.can_add_workers(user)
     people = [_person(p, project, work_date, can_add) for p in data.get("people") or [] if str(p.get("name") or "").strip()]
     photos = _unassigned_photos(link_row)
+    crews = [_crew(row, project, can_add) for row in data.get("crews") or []]
+    crews = [row for row in crews if row is not None]
+    free = data.get("via") == "ai" or bool(data.get("unread") or extra or any(c["status"] == "none" for c in crews)
+                                           or data.get("asked_project"))
+    via = "ai" if data.get("via") == "ai" else "tu_do" if free else "ngan"
+    payload = {"work_date": work_date.isoformat(), "note": str(data.get("note") or "")[:5000], "lines": lines, "people": people,
+               "extra": extra, "crews": crews, "via": via, "asks": []}
+    for key, value in (("plan", plan), ("unread", str(data.get("unread") or "")[:200]), ("free", free)):
+        if value:
+            payload[key] = value
     with transaction.atomic():
         proposal = Proposal.objects.create(link=link_row, project=project, kind=Proposal.Kind.REPORT, source_text=source_text[:5000],
-                                           payload={"work_date": work_date.isoformat(), "note": str(data.get("note") or "")[:5000],
-                                                    "lines": lines, "people": people,
-                                                    **({"unread": str(data["unread"])[:200]} if data.get("unread") else {}),
-                                                    **({"free": True} if data.get("via") == "ai" or data.get("unread") else {})})
+                                           payload=payload)
         for photo, target in zip(photos, assign_photos(photos, lines)):
             photo.proposal, photo.target = proposal, target
             photo.save(update_fields=["proposal", "target"])
+    if data.get("asked_project"):
+        _ask(proposal, Feedback.Topic.PROJECT, "", "project", log=False)
+    if payload.get("unread"):
+        _ask(proposal, Feedback.Topic.UNREAD, f"Bot chưa đọc được: \"{payload['unread']}\"", "unread")
+    for row in extra:
+        if row.get("code"):
+            _ask(proposal, Feedback.Topic.VALUE, f"{row['code']} có trên bản vẽ nhưng tin không ghi %: {row['description']}",
+                 f"value:{row['code']}")
     _after_change(link_row, proposal)
     return proposal
 
@@ -266,13 +384,18 @@ def blockers(proposal):
         out.append("chọn chi tiết cho ảnh")
     if unresolved_people(proposal):
         out.append("xác định người")
+    if unresolved_teams(proposal):
+        out.append("xác định tổ")
     if needs_reason(proposal):
         out.append("nhắn lý do")
     return out
 
 
 def _after_change(link_row, proposal):
-    _state(link_row, reason_for=str(proposal.pk) if needs_reason(proposal) else None)
+    waiting = needs_reason(proposal)
+    _state(link_row, reason_for=str(proposal.pk) if waiting else None)
+    for label in waiting:
+        _ask(proposal, Feedback.Topic.REASON, f"Bot hỏi lý do (báo thấp hơn mức đã báo hoặc sửa công): {label}", f"reason:{label}")
 
 
 def summary(proposal):
@@ -293,13 +416,22 @@ def summary(proposal):
             out.append(f"• {line['code']} – {line['work']}: {value} · " + (f"{count} ảnh" if count else "chưa có ảnh"))
             if line.get("decrease_from"):
                 out.append(f"  ⚠ Thấp hơn mức đã báo {line['decrease_from']}. Lý do: {line.get('reason') or 'chưa có'}")
+        if p.get("extra"):
+            out.append("Việc ngoài bản vẽ (ghi lại, không tính % tiến độ):")
+            for row in p["extra"]:
+                out.append("• " + extra_label(row))
+                if row.get("code"):
+                    out.append(f"  ⚠ {row['code']} có trên bản vẽ nhưng chưa có %: muốn tính tiến độ thì nhắn lại kiểu "
+                               f"\"{proposal.project.code} {row['code']} 40%\".")
         if p.get("unread"):
             out.append(f"⚠ Bot CHƯA ĐỌC được phần: \"{p['unread']}\". Nếu là chấm công, nhắn lại kiểu: "
                        f"{proposal.project.code if proposal.project else 'TN-22'} … Công: Thắng phụ, Thuận thợ (phiếu này chưa có các tên đó).")
         people = p.get("people") or []
         author = proposal.link.user
         role = "giám đốc" if author.is_director else author.get_role_display().lower()
-        out.append(f"Chấm công: {author} ({role}, có mặt)" + (f" + {len(people)} người:" if people else ", chưa có thợ nào"))
+        crews = p.get("crews") or []
+        out.append(f"Chấm công: {author} ({role}, có mặt)" + (f" + {len(people)} người có tên:" if people
+                                                              else ", chưa có thợ nào" if not crews else ""))
         for person in people:
             days = vn_number(Decimal(person["days"]))
             if person["status"] == "ok":
@@ -317,6 +449,15 @@ def summary(proposal):
             if person.get("warning"):
                 line += f" ⚠ {person['warning']}"
             out.append(line)
+        if crews:
+            out.append("Số người theo tổ (không cần tên; tổ khoán tính tiền ở khoản khoán, tổ của chủ nhà không tính tiền):")
+            for row in crews:
+                line = "• " + crew_line(row)
+                if row["status"] == "none":
+                    line += " — lần sau ghi tên tổ, vd \"tổ xây: 3 thợ 2 phụ\"; thợ công nhật thì ghi tên từng người"
+                elif row["status"] in ("ask", "new"):
+                    line += " — bấm chọn ở tin bot hỏi"
+                out.append(line)
         common = proposal.photos.filter(target="").count()
         if common:
             out.append(f"Ảnh chung: {common}")
@@ -327,6 +468,7 @@ def summary(proposal):
             out.append("Thêm ảnh cho chi tiết: gửi ảnh, chú thích ghi mã chi tiết (vd T2.5).")
         if needs_reason(proposal):
             out.append("Nhắn lý do (báo thấp hơn hoặc sửa công) cho: " + ", ".join(needs_reason(proposal)) + ".")
+        out += plan_text(proposal)
     elif proposal.kind == Proposal.Kind.FIX:
         out.append(f"Sửa chấm công {p['label']} ngày {p['work_date'][8:10]}/{p['work_date'][5:7]}: "
                    f"{vn_number(Decimal(p['before']))} → {vn_number(Decimal(p['days']))} công. Lý do: {p['reason']}")
@@ -340,7 +482,8 @@ def summary(proposal):
     else:
         out.append(f"Trả lời yêu cầu: {p['note']}")
     if proposal.kind == Proposal.Kind.REPORT and p.get("free"):
-        out += ["", "📝 Lần sau nhắn theo mẫu này, bot hiểu ngay không cần hỏi lại:", standard_text(proposal),
+        out += ["", "📝 Lần sau nhắn theo mẫu này, bot hiểu ngay không cần hỏi lại (việc có trên bản vẽ ghi mã; việc ngoài bản vẽ "
+                    "ghi sau dấu +):", standard_text(proposal),
                 f"Tra mã chi tiết: bản vẽ {settings.APP_URL}/ban-ve/{proposal.project.code}/ · bảng khối lượng "
                 f"{settings.APP_URL}/ban-ve/{proposal.project.code}/khoi-luong/"]
     blocked = blockers(proposal)
@@ -349,8 +492,37 @@ def summary(proposal):
     return "\n".join(out)
 
 
+def extra_label(row):
+    floor = row.get("floor") or ""
+    where = f"{floor} · " if floor and floor.casefold() not in row["description"].casefold() else ""
+    value = f" · {vn_number(Decimal(str(row['percent'])))}% (tự báo)" if row.get("percent") is not None else ""
+    return where + row["description"] + value
+
+
+def _day(iso):
+    return f"{iso[8:10]}/{iso[5:7]}"
+
+
+def plan_text(proposal):
+    """Dòng kế hoạch của phiếu + so kế hoạch đã báo cho ngày báo cáo với việc thực làm (kể cả dòng của phiếu này)."""
+    p, out = proposal.payload, []
+    plan = p.get("plan")
+    if plan:
+        out.append(f"Kế hoạch {_day(plan['date'])} (dự kiến, chưa phải việc đã làm):")
+        out += [f"• {(row['code'] + ' ') if row.get('code') and row['code'] not in row['description'] else ''}"
+                f"{extra_label(row)}" for row in plan["lines"]]
+    rows = plans.compare(proposal.project, field._work_date(p["work_date"]), p)
+    if rows:
+        done = [plans.label(r) for r in rows if r["done"]]
+        left = [plans.label(r) for r in rows if not r["done"]]
+        out.append(f"So với kế hoạch đã báo cho {_day(p['work_date'])}: {len(done)}/{len(rows)} việc thấy đã làm.")
+        out += [f"  ✓ {x}" for x in done] + [f"  ● chưa thấy trong báo cáo: {x}" for x in left]
+    return out
+
+
 def standard_text(proposal):
-    """Báo cáo viết lại theo cú pháp ngắn chuẩn: "TN-22 19/11 D179 20%; D207 30%. Công: Hậu thợ; Thắng, Thuận phụ"."""
+    """Báo cáo viết lại theo cú pháp ngắn chuẩn, bot đọc lại được:
+    "TN-22 19/11 D179 20%; D207 30%" / "+ Cắt đục sàn mái" / "Công: Hậu thợ; Thắng phụ, Thuận phụ" / "Dự kiến 20/11: …"."""
     p = proposal.payload
     work = "; ".join(f"{l['code']} {vn_number(Decimal(str(l['percent'])))}%" if l.get("percent") is not None
                      else f"{l['code']} {vn_number(Decimal(str(l['quantity'])))} {l['unit']}" for l in p.get("lines") or [])
@@ -361,29 +533,48 @@ def standard_text(proposal):
         kind = (person.get("new") or {}).get("kind") or Worker.objects.filter(pk=person.get("worker_id") or 0).values_list(
             "kind", flat=True).first() or ""
         days = Decimal(str(person.get("days") or 1))
-        name = person["name"] + ("" if days == 1 else " nửa ngày" if days == Decimal("0.5") else f" {vn_number(days)} công")
-        groups.setdefault({"tho": "thợ", "phu": "phụ", "hoc": "học việc"}.get(kind, ""), []).append(name)
-    people = "; ".join(", ".join(names) + (f" {kind}" if kind else "") for kind, names in groups.items())
-    day = f"{p['work_date'][8:10]}/{p['work_date'][5:7]}"
-    return f"{proposal.project.code} {day} {work or '<mã chi tiết> <%>'}." + (f" Công: {people}" if people else " Công: <tên thợ> thợ; <tên> phụ")
+        word = {"tho": "thợ", "phu": "phụ", "hoc": "học việc"}.get(kind, "")
+        name = person["name"] + (f" {word}" if word else "")
+        groups.setdefault(word, []).append(name + ("" if days == 1 else " nửa ngày" if days == Decimal("0.5") else f" {vn_number(days)} công"))
+    people = "; ".join(", ".join(names) for names in groups.values())
+    out = [f"{proposal.project.code} {_day(p['work_date'])} {work or '<mã chi tiết> <%>'}"]
+    out += [f"+ {extra_label(row)}" for row in p.get("extra") or [] if not row.get("code")]
+    crews = [c for c in p.get("crews") or [] if c["status"] != "none"]
+    if crews:
+        out.append("Nhân sự: " + "; ".join(
+            f"tổ {c['name']}" + (" (chủ nhà)" if c.get("kind") == Team.Kind.OWNER else "")
+            + "".join(f" {n} {w}" for n, w in ((c["skilled"], "thợ"), (c["helpers"], "phụ"), (c["others"], "người")) if n)
+            for c in crews))
+    if people or not crews:
+        out.append(f"Công: {people}" if people else "Công: <tên thợ công nhật> thợ; <tên> phụ")
+    if p.get("plan"):
+        out.append(f"Dự kiến {_day(p['plan']['date'])}: " + "; ".join(row["description"] for row in p["plan"]["lines"]))
+    return "\n".join(out)
 
 
 def offer_staff(chat_id, proposal):
     """Báo cáo chưa có tên thợ nào: đưa danh sách nhân sự (người làm ở công trình gần đây trước) để bấm thêm."""
     if proposal.kind != Proposal.Kind.REPORT or proposal.payload.get("people") or proposal.payload.get("offered"):
         return
+    crews = proposal.payload.get("crews") or []
+    if any(c["status"] != "none" for c in crews):      # đã có số người theo tổ: tổ khoán, tổ chủ nhà không cần tên
+        return
     recent = recent_for(proposal.project)
     staff = sorted(Worker.objects.filter(active=True).exclude(pay=Worker.Pay.MONTHLY).select_related("trade"),
                    key=lambda w: (w.pk not in recent, w.code or "", w.name))[:16]
     short = str(proposal.pk)[:8]
-    text = (f"Báo cáo chưa có tên thợ nên chưa chấm công được. Bấm từng người làm hôm nay ở {proposal.project.code} "
-            f"(mỗi người 1 công; nửa ngày thì nhắn lại). Danh sách đầy đủ: {settings.APP_URL}/tho/")
+    text = (f"Báo cáo chưa có tên thợ nên chưa chấm công được. Thợ CÔNG NHẬT: bấm từng người làm hôm nay ở {proposal.project.code} "
+            f"(mỗi người 1 công; nửa ngày thì nhắn lại). Tổ khoán, tổ của chủ nhà: không cần tên, nhắn số người theo tổ, vd "
+            f"\"tổ xây: 3 thợ 2 phụ; tổ điện chủ nhà 2 người\". Danh sách đầy đủ: {settings.APP_URL}/tho/")
     if not staff:
         telegram.send(chat_id, text + "\nChưa có ai trong danh sách nhân sự: nhắn lại kèm tên, vd \"Công: Thắng phụ, Thuận thợ\".")
     else:
         telegram.send(chat_id, text, [[{"text": "＋ " + _label(w), "data": f"pa:{short}:{w.pk}"}] for w in staff])
     proposal.payload = {**proposal.payload, "offered": True}
     proposal.save(update_fields=["payload"])
+    crew = "; ".join(crew_line(c) for c in crews)
+    _ask(proposal, Feedback.Topic.NO_STAFF, "Báo cáo không có tên thợ, không có tổ" + (f" (tin ghi \"{crew}\")" if crew else "")
+         + ", bot đưa danh sách nhân sự để bấm", "staff")
 
 
 def add_person(link_row, short_id, worker_id):
@@ -423,6 +614,8 @@ def ask_photos(chat_id, proposal):
         sent = telegram.send_photo(chat_id, photo.file_id, "Ảnh này của chi tiết nào?", buttons) if photo.file_id else None
         photo.prompt_message_id = (sent or {}).get("message_id") or 0
         photo.save(update_fields=["prompt_message_id"])
+        _ask(proposal, Feedback.Topic.PHOTO, "Ảnh gửi không ghi mã chi tiết, bot hỏi ảnh của chi tiết nào ("
+             + ", ".join(line["code"] for line in lines[:12]) + ")", f"photo:{photo.pk}")
 
 
 def ask_people(chat_id, proposal):
@@ -441,9 +634,66 @@ def ask_people(chat_id, proposal):
         buttons.append([{"text": "Bỏ tên này", "data": f"wk:{key}:x"}])
         telegram.send(chat_id, text, buttons)
         asked.add(str(index))
+        _ask(proposal, Feedback.Topic.PERSON, f"Tên thợ \"{person['name']}\" " + ("gần giống nhiều người" if person["status"] == "ask"
+                                                                              else "chưa có trong danh sách") + ", bot hỏi là ai",
+             f"person:{index}")
     if asked != set(proposal.payload.get("asked") or []):
         proposal.payload = {**proposal.payload, "asked": sorted(asked)}
         proposal.save(update_fields=["payload"])
+
+
+def ask_teams(chat_id, proposal):
+    """Tổ mới hoặc tên tổ gần giống: hỏi một lần mỗi tổ — chọn tổ có sẵn, hoặc thêm tổ khoán của ta / tổ của chủ nhà."""
+    asked = set(proposal.payload.get("asked_teams") or [])
+    for index, row in unresolved_teams(proposal):
+        if str(index) in asked:
+            continue
+        key = f"{str(proposal.pk)[:8]}:{index}"
+        buttons = [[{"text": c["label"], "data": f"tm:{key}:{c['id']}"}] for c in row.get("candidates") or []]
+        buttons.append([{"text": "＋ Tổ khoán của ta", "data": f"tm:{key}:k"}, {"text": "＋ Tổ của chủ nhà", "data": f"tm:{key}:c"}])
+        buttons.append([{"text": "Không rõ tổ", "data": f"tm:{key}:x"}])
+        text = (f"\"tổ {row['name']}\" là tổ nào ở {proposal.project.code}?" if row["status"] == "ask" else
+                f"\"tổ {row['name']}\" chưa có ở {proposal.project.code}. Tổ khoán của ta (tính chi phí khoán) hay tổ của chủ nhà "
+                "(chủ nhà ký trực tiếp, chỉ ghi để phối hợp)?")
+        telegram.send(chat_id, text, buttons)
+        asked.add(str(index))
+        _ask(proposal, Feedback.Topic.TEAM, f"Tổ \"{row['name']}\" " + ("gần giống tổ có sẵn" if row["status"] == "ask"
+                                                                       else "chưa có ở công trình") + ", bot hỏi là tổ nào",
+             f"team:{index}", count=row["status"] == "ask")
+    if asked != set(proposal.payload.get("asked_teams") or []):
+        proposal.payload = {**proposal.payload, "asked_teams": sorted(asked)}
+        proposal.save(update_fields=["payload"])
+
+
+@transaction.atomic
+def choose_team(link_row, short_id, index, choice):
+    proposal = _pending(link_row, short_id)
+    if proposal is None:
+        return "Phiếu không còn chờ.", None
+    crews = [dict(c) for c in proposal.payload.get("crews") or []]
+    if not index.isdecimal() or int(index) >= len(crews) or crews[int(index)]["status"] not in ("ask", "new"):
+        return "Tổ này đã được chọn.", None
+    row = crews[int(index)]
+    if choice == "x":
+        row.update(status="none", candidates=[])
+        text = f"✓ Ghi {row['name']} là chưa rõ tổ"
+    elif choice in ("k", "c"):
+        if not field.can_add_workers(link_row.user):
+            return "Anh/chị không được thêm tổ.", None
+        kind = Team.Kind.OWNER if choice == "c" else Team.Kind.CONTRACT
+        row.update(status="new_ok", new={"name": row["name"], "kind": kind}, kind=kind, candidates=[],
+                   label=f"tổ {row['name']} ({'của chủ nhà' if kind == Team.Kind.OWNER else 'khoán của ta'}, tổ mới)")
+        text = f"✓ Thêm {row['label']}"
+    elif choice.isdecimal() and int(choice) in {c["id"] for c in row.get("candidates") or []}:
+        team = Team.objects.get(pk=int(choice))
+        row.update(status="ok", team_id=team.pk, label=_team_label(team), kind=team.kind, candidates=[])
+        text = f"✓ {row['label']}"
+    else:
+        return "Lựa chọn không hợp lệ.", None
+    crews[int(index)] = row
+    proposal.payload = {**proposal.payload, "crews": crews}
+    proposal.save(update_fields=["payload"])
+    return text, proposal
 
 
 def _proposal_reply(chat_id, proposal):
@@ -451,6 +701,7 @@ def _proposal_reply(chat_id, proposal):
     if proposal.kind == Proposal.Kind.REPORT:
         ask_photos(chat_id, proposal)
         ask_people(chat_id, proposal)
+        ask_teams(chat_id, proposal)
         offer_staff(chat_id, proposal)
     elif proposal.kind == Proposal.Kind.MONEY:
         money_bot.ask(chat_id, proposal, reads.projects(proposal.link.user))
@@ -635,9 +886,15 @@ def decide(link_row, proposal_id, confirm):
                 attendance = [{"worker_id": x["worker_id"], "days": x["days"], "reason": x.get("reason", "")}
                               for x in p.get("people") or [] if x["status"] == "ok"]
                 attendance += [{"new": x["new"], "days": x["days"]} for x in p.get("people") or [] if x["status"] == "new_ok"]
-                report = field.submit_report(user, proposal.project, {"work_date": p["work_date"], "note": p.get("note", ""),
-                                                                      "lines": p.get("lines") or [], "attendance": attendance},
-                                             files, client_key=proposal.pk, channel="telegram")
+                named = sum(1 for x in p.get("people") or [] if x["status"] in ("ok", "same", "new_ok"))
+                report = field.submit_report(user, proposal.project, {
+                    "work_date": p["work_date"], "note": p.get("note", ""), "lines": p.get("lines") or [], "attendance": attendance,
+                    "extra": p.get("extra") or [], "plan": p.get("plan") or {}, "via": p.get("via", ""),
+                    "asked": sum(1 for a in p.get("asks") or [] if a.get("count", True)), "named": named,
+                    "crews": [{"team_id": c.get("team_id"), "new": c.get("new"), "skilled": c["skilled"], "helpers": c["helpers"],
+                               "others": c["others"], "work": c.get("work", "")}
+                              for c in p.get("crews") or [] if c["status"] in ("ok", "new_ok", "none")]},
+                    files, client_key=proposal.pk, channel="telegram")
                 result = {"report": report.pk, "url": f"/ban-ve/{proposal.project.code}/"}
             elif proposal.kind == Proposal.Kind.FIX:
                 worker = Worker.objects.get(pk=p["worker_id"])
@@ -664,27 +921,71 @@ def decide(link_row, proposal_id, confirm):
         proposal.state, proposal.error, proposal.decided_at = Proposal.State.FAILED, "; ".join(
             getattr(error, "messages", [str(error)]))[:480], timezone.now()
         record_save(proposal, user, "Xác nhận nhưng Tend không nhận phiếu", channel="telegram")
-        task_bot.friction(user, proposal.error, f"phiếu {proposal.get_kind_display().lower()} không ghi được")
+        task_bot.friction(user, proposal.error, f"phiếu {proposal.get_kind_display().lower()} không ghi được",
+                          topic=Feedback.Topic.FAILED, project=proposal.project)
         return "Chưa ghi được: " + proposal.error
     proposal.state, proposal.result, proposal.decided_at = Proposal.State.CONFIRMED, result, timezone.now()
     record_save(proposal, user, "Xác nhận phiếu chat; đã ghi", channel="telegram")
+    done = "Đã ghi vào Tend." + (f"\nXem: {settings.APP_URL}{result['url']}" if result.get("url") else "")
     if proposal.kind == Proposal.Kind.REPORT:
-        transaction.on_commit(lambda: notify_directors(proposal, user))
-    return "Đã ghi vào Tend." + (f"\nXem: {settings.APP_URL}{result['url']}" if result.get("url") else "")
+        report = Report.objects.get(pk=result["report"])
+        score = quality.of(report)
+        transaction.on_commit(lambda: notify_directors(proposal, user, report, score))
+        transaction.on_commit(lambda: post_to_groups(proposal, user, report))
+        if score is not None:
+            done += f"\nMức đầy đủ báo cáo: {score.text()}."
+            if score.total < quality.GOOD:
+                done += " Lần sau ghi mã chi tiết + %, kèm ảnh (chú thích ghi mã) và tên thợ để bot không phải hỏi lại."
+    return done
 
 
-def notify_directors(proposal, author):
+def report_lines(proposal, report=None):
+    """Nội dung báo cáo đã ghi, không có tiền, không có điểm: tiến độ, việc ngoài bản vẽ, nhân sự, so kế hoạch, kế hoạch."""
     p = proposal.payload
     lines = ", ".join(f"{l['code']} " + (f"{vn_number(Decimal(str(l['percent'])))}%" if l.get("percent") is not None
                                           else f"{vn_number(Decimal(str(l['quantity'])))} {l['unit']}") for l in p.get("lines") or [])
     people = [x for x in p.get("people") or [] if x["status"] in ("ok", "same", "new_ok")]
-    text = (f"BÁO CÁO {proposal.project.code} · {author} · {p['work_date'][8:10]}/{p['work_date'][5:7]}\n"
-            + (f"Tiến độ: {lines}\n" if lines else "") + f"Chấm công: giám sát + {len(people)} người"
-            + (f"\nGhi chú: {p['note'][:300]}" if p.get("note") else "")
-            + f"\nXem: {settings.APP_URL}/ban-ve/{proposal.project.code}/")
+    extra = "; ".join(extra_label(row) for row in p.get("extra") or [])
+    compared = plans.compare(proposal.project, field._work_date(p["work_date"])) if report is not None else []
+    left = [plans.label(r) for r in compared if not r["done"]]
+    plan = p.get("plan")
+    return [
+        f"Tiến độ: {lines}" if lines else "",
+        f"Việc ngoài bản vẽ: {extra}" if extra else "",
+        f"Chấm công: giám sát + {len(people)} người có tên",
+        ("Số người theo tổ: " + "; ".join(crew_line(c) for c in p.get("crews") or [])) if p.get("crews") else "",
+        (f"So kế hoạch {_day(p['work_date'])}: {len(compared) - len(left)}/{len(compared)} việc đã làm"
+         + (f"; chưa thấy: {'; '.join(left[:6])}" if left else "")) if compared else "",
+        (f"Kế hoạch {_day(plan['date'])}: " + "; ".join(row["description"] for row in plan["lines"][:8])) if plan else ""]
+
+
+def notify_directors(proposal, author, report=None, score=None):
+    p = proposal.payload
+    text = "\n".join(filter(None, [
+        f"BÁO CÁO {proposal.project.code} · {author} · {_day(p['work_date'])}", *report_lines(proposal, report),
+        f"Mức đầy đủ: {score.text()}" if score is not None else "",
+        f"Ghi chú: {p['note'][:300]}" if p.get("note") else "",
+        f"Xem: {settings.APP_URL}/ban-ve/{proposal.project.code}/"]))
     for row in ChatLink.objects.filter(active=True, user__is_active=True).exclude(user=author).select_related("user"):
         if row.user.is_director:
             telegram.send(row.chat_id, text)
+
+
+def post_to_groups(proposal, author, report=None):
+    """Báo cáo đã xác nhận → đăng vào các nhóm Telegram của công trình (chủ dự án chốt 20/11/2026: như nhóm Zalo, mọi
+    người cùng thấy). Không có tiền, không có điểm báo cáo, không có ghi chú gốc."""
+    from .models import Group
+    groups = list(Group.objects.filter(active=True, project=proposal.project))
+    if not groups:
+        return
+    p = proposal.payload
+    photos = proposal.photos.count()
+    text = "\n".join(filter(None, [
+        f"✓ ĐÃ GHI BÁO CÁO {proposal.project.code} · ngày {_day(p['work_date'])} · {author}", *report_lines(proposal, report),
+        f"Ảnh: {photos}" if photos else "",
+        f"Xem bản vẽ: {settings.APP_URL}/ban-ve/{proposal.project.code}/"]))
+    for group in groups:
+        telegram.send(group.chat_id, group_bot.PREFIX + text)
 
 
 def notify_ask(ask):
@@ -786,6 +1087,9 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
         task_bot.escalate(user, question, reply_chat, where, message_id, project, draft)
         return "Dạ em ghi nhận, em hỏi Giám đốc và trả lời lại ở đây."
 
+    if passive and not _group_report_like(text, user, project):
+        _date_hint(link_row, text)
+        return None, None
     if ai.available():
         photos = _unassigned_photos(link_row)
         images = []
@@ -835,18 +1139,73 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
     data = parse.money(text, reads.projects(user))
     if data:
         return None, money_bot.build(link_row, data, text)
-    data = parse.report(text, reads.projects(user))
+    projects = reads.projects(user)
+    data = parse.report(text, projects, codes=item_codes, strict=passive)
+    if data and data.get("needs_project") and project is not None:      # nhóm của một công trình: báo cáo của công trình đó
+        data = parse.report(text, [project], codes=item_codes, strict=passive)
+    if data and data.get("needs_project"):
+        ask_project(link_row, text, projects)
+        return (None if group is None or passive else "Em đã nhắn riêng anh/chị chọn công trình cho báo cáo."), None
     if data:
         return None, build_report(link_row, data, text)
     if passive:
         return None, None
     if group is not None:
         return escalate(text), None
-    task_bot.friction(user, text, "bot không hiểu tin nhắn")
+    task_bot.friction(user, text, "bot không hiểu tin nhắn", topic=Feedback.Topic.NOT_UNDERSTOOD)
     return ("Chưa hiểu tin nhắn. Trợ lý AI chưa bật nên bot đọc cú pháp ngắn, ví dụ:\n"
             "\"TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ\" (kèm ảnh).\n"
             "/trogiup để xem lệnh; /hoi <câu hỏi> để hỏi Giám đốc."
             + "".join(f"\nTra mã chi tiết {p.code}: {settings.APP_URL}/ban-ve/{p.code}/khoi-luong/" for p in reads.projects(user)[:3])), None
+
+
+def _group_report_like(text, user, project):
+    """Nghe tin trong nhóm: chỉ xử lý tin mở đầu "Báo cáo ngày 20/11"/"Công việc ngày 20/11", cú pháp ngắn có mã chi tiết + %,
+    hoặc phiếu thu chi cú pháp ngắn. Chuyện trao đổi thường bỏ qua (không gọi AI, không tốn chi phí)."""
+    if parse.DATED_HEAD.match(text):
+        return True
+    known = item_codes(project) if project is not None else []
+    if parse.line_pattern(list(known)).search(text):
+        return True
+    return bool(parse.money(text, reads.projects(user)))
+
+
+def _date_hint(link_row, text):
+    """Tin trong nhóm mở đầu "Báo cáo…" mà thiếu ngày: nhắn riêng hướng dẫn, mỗi người một lần mỗi ngày."""
+    today = timezone.localdate().isoformat()
+    if not parse.REPORT_HEAD.match(text) or (link_row.state or {}).get("date_hint") == today:
+        return
+    _state(link_row, date_hint=today)
+    telegram.send(link_row.chat_id, "Tin \"" + text[:60] + "…\" trong nhóm chưa ghi ngày nên bot chưa lập phiếu. Báo cáo trong nhóm "
+                  f"mở đầu kèm ngày, vd \"Báo cáo ngày {timezone.localdate():%d/%m}\" hoặc \"Công việc ngày "
+                  f"{timezone.localdate():%d/%m}\", rồi các dòng + việc đã làm, nhân sự theo tổ, dự kiến mai.")
+
+
+def ask_project(link_row, text, projects):
+    """Báo cáo không ghi mã công trình, người gửi có nhiều công trình: giữ tin, gửi nút chọn công trình (tin riêng)."""
+    _state(link_row, report_text=text[:4000])
+    task_bot.friction(link_row.user, f"Báo cáo không ghi mã công trình: {text}", "bot hỏi lại · phiếu báo cáo ngày",
+                      topic=Feedback.Topic.PROJECT)
+    telegram.send(link_row.chat_id, "Báo cáo này của công trình nào? Bấm chọn (lần sau ghi mã công trình ở đầu tin, vd "
+                  f"\"{projects[0].code if projects else 'TN-22'} …\").",
+                  [[{"text": p.code, "data": f"rp:{p.pk}"} for p in projects[i:i + 3]] for i in range(0, min(len(projects), 12), 3)])
+
+
+def choose_project(link_row, chat_id, value):
+    text = (link_row.state or {}).get("report_text")
+    project = next((p for p in reads.projects(link_row.user) if str(p.pk) == value), None)
+    if not text or project is None:
+        return "Tin báo cáo không còn chờ. Nhắn lại kèm mã công trình."
+    _state(link_row, report_text=None)
+    data = parse.report(text, [project], codes=item_codes)
+    if not data or data.get("needs_project"):
+        return "Không đọc được báo cáo. Nhắn lại kèm mã công trình."
+    try:
+        proposal = build_report(link_row, {**data, "asked_project": True}, text)
+    except (ValidationError, PermissionDenied) as error:
+        return _error_text(error)
+    _proposal_reply(chat_id, proposal)
+    return f"✓ {project.code}"
 
 
 def _void(link_row, ref, reason, text):
@@ -990,6 +1349,12 @@ def handle_callback(callback):
         telegram.answer_callback(callback.get("id", ""), "Chưa kết nối Tend.")
         return
     kind, _, value = data.partition(":")
+    if kind == "rp":
+        text = choose_project(link_row, chat_id, value)
+        telegram.answer_callback(callback.get("id", ""), text[:190])
+        if not text.startswith("✓"):
+            telegram.send(chat_id, text)
+        return
     if kind == "pa":
         short_id, _, worker_id = value.partition(":")
         text, proposal = add_person(link_row, short_id, worker_id)
@@ -997,17 +1362,18 @@ def handle_callback(callback):
         if proposal is not None:
             telegram.send(chat_id, summary(proposal), _buttons(proposal))
         return
-    if kind in ("ph", "wk"):
+    if kind in ("ph", "wk", "tm"):
         if kind == "ph":
             photo_id, _, choice = value.partition(":")
             text, proposal = choose_photo(link_row, photo_id, choice) if photo_id.isdecimal() else ("Lựa chọn không hợp lệ.", None)
         else:
             short_id, index, choice = (value.split(":") + ["", ""])[:3]
-            text, proposal = choose_person(link_row, short_id, index, choice)
+            text, proposal = (choose_person if kind == "wk" else choose_team)(link_row, short_id, index, choice)
         telegram.answer_callback(callback.get("id", ""), text)
         if message.get("message_id") and text.startswith("✓"):
             (telegram.edit_caption if kind == "ph" else lambda c, m, t: telegram.edit(c, m, t))(chat_id, message["message_id"], text)
-        if proposal is not None and not proposal.photos.filter(target="?").exists() and not unresolved_people(proposal):
+        if (proposal is not None and not proposal.photos.filter(target="?").exists() and not unresolved_people(proposal)
+                and not unresolved_teams(proposal)):
             telegram.send(chat_id, summary(proposal), _buttons(proposal))
         return
     if kind in ("mp", "mj", "md"):

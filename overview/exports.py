@@ -15,8 +15,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from field import rates
-from field.models import Attendance, Report, Worker
+from field import crews as crew_lookup
+from field import plans, quality, sheet as timesheet
+from field.models import Attendance, ExtraWork, PlanLine, Report
 from money import services as money
 from money.models import ACCRUALS, RECEIPTS, Entry
 
@@ -210,11 +211,13 @@ def month_book(user, project, first, today=None):
     if p_end["missing"]:
         summary.pairs("Thiếu dữ liệu", [(p_end["missing"], "")])
     reports = list(Report.objects.filter(project=project, work_date__range=(start, end))
-                   .select_related("author").prefetch_related("lines__item", "photos").order_by("work_date", "created_at"))
+                   .select_related("author").prefetch_related("lines__item", "photos", "extra_work", "plan_lines", "crews__team")
+                   .order_by("work_date", "created_at"))
     attendance = list(Attendance.objects.filter(project=project, work_date__range=(start, end)).select_related("worker", "staff"))
     worker_days = sum((a.days for a in attendance if a.worker_id), ZERO)
     summary.pairs("Hiện trường", [("Số báo cáo ngày", len(reports)), ("Số ngày có báo cáo", len({r.work_date for r in reports})),
                                   ("Tổng công thợ", worker_days),
+                                  ("Việc ngoài bản vẽ (không tính % tiến độ)", sum(len(r.extra_work.all()) for r in reports)),
                                   ("Lượt có mặt của giám sát", sum(1 for a in attendance if a.staff_id))], QTY)
     if sale or cost:
         money_items = []
@@ -225,41 +228,67 @@ def month_book(user, project, first, today=None):
             money_items += [("Giá vốn phần làm trong tháng", totals["cost"]), ("Chi phí công nhật ước tính trong tháng", month_labor)]
         summary.pairs("Giá trị trong tháng", money_items)
 
-    # Báo cáo ngày
-    log = Sheet(book, "Báo cáo ngày", f"{project.code} · các báo cáo ngày tháng {first:%m/%Y}")
-    log.table(["Ngày", "Người báo", "Chi tiết", "Ảnh", "Ghi chú"],
-              [[r.work_date, str(r.author), "; ".join(
-                  f"{l.item.code} {float(l.percent):g}%" if l.percent is not None else f"{l.item.code} {float(l.quantity):g} {l.item.unit}"
-                  for l in r.lines.all()), r.photos.count(), r.note[:500]] for r in reports],
-              {"Ngày": DAY}, {"Chi tiết": 50, "Ghi chú": 50})
+    # Báo cáo ngày (việc ngoài bản vẽ và kế hoạch ghi kèm; mức đầy đủ chỉ Giám đốc xem)
+    log = Sheet(book, "Báo cáo ngày", f"{project.code} · các báo cáo ngày tháng {first:%m/%Y}",
+                "Việc ngoài bản vẽ ghi lại, không tính vào % tiến độ. Kế hoạch là việc dự kiến, chưa phải việc đã làm.")
+    head = ["Ngày", "Người báo", "Chi tiết", "Việc ngoài bản vẽ", "Kế hoạch", "Số người theo tổ", "Ảnh", "Ghi chú"]
+    if user.is_director:
+        head.append("Mức đầy đủ")
+    table = []
+    for r in reports:
+        plan_rows = list(r.plan_lines.all())
+        row = [r.work_date, str(r.author), "; ".join(
+            f"{l.item.code} {float(l.percent):g}%" if l.percent is not None else f"{l.item.code} {float(l.quantity):g} {l.item.unit}"
+            for l in r.lines.all()), "; ".join(str(e) for e in r.extra_work.all()),
+            (f"{plan_rows[0].for_date:%d/%m}: " + "; ".join(str(x) for x in plan_rows)) if plan_rows else "",
+            crew_lookup.text(r.crews.all()),
+            r.photos.count(), r.note[:500]]
+        if user.is_director:
+            score = quality.of(r)
+            row.append(score.text() if score else "chỉ chấm công/ảnh")
+        table.append(row)
+    log.table(head, table, {"Ngày": DAY}, {"Chi tiết": 40, "Việc ngoài bản vẽ": 40, "Kế hoạch": 40, "Số người theo tổ": 36,
+                                          "Ghi chú": 50, "Mức đầy đủ": 40})
 
-    # Chấm công
-    people = defaultdict(lambda: {"days": ZERO, "dates": set(), "worker": None})
-    attendance = list(attendance)
-    rate_table = rates.table(a.worker_id for a in attendance if a.worker_id)
-    for a in attendance:
-        key = a.worker.name if a.worker_id else f"{a.staff} (giám sát)"
-        people[key]["days"] += a.days
-        people[key]["dates"].add(a.work_date)
-        people[key]["worker"] = a.worker
-        if a.worker is not None:
-            pay, amount = rates.at(rate_table, a.worker, a.work_date)
-            if pay == Worker.Pay.DAILY and amount is not None:
-                people[key]["rate"] = amount
-                people[key]["cost"] = (people[key].get("cost") or ZERO) + a.days * amount
-    work = Sheet(book, "Chấm công", f"{project.code} · chấm công tháng {first:%m/%Y}", "8 giờ = 1 công. Thợ tổ khoán không tính tiền công nhật.")
+    # Việc ngoài bản vẽ
+    extra = Sheet(book, "Việc ngoài bản vẽ", f"{project.code} · việc ngoài bản vẽ tháng {first:%m/%Y}",
+                  "Việc giám sát báo không có mã chi tiết (vd cắt đục sàn mái). Không tính vào % tiến độ.")
+    extra.table(["Ngày", "Người báo", "Tầng", "Việc", "% tự báo"],
+                [[e.report.work_date, str(e.report.author), e.floor, e.description, _pct(e.percent)]
+                 for e in ExtraWork.objects.filter(report__project=project, report__work_date__range=(start, end))
+                 .select_related("report__author").order_by("report__work_date", "pk")],
+                {"Ngày": DAY, "% tự báo": PCT}, {"Việc": 50})
+
+    # Kế hoạch so với thực làm (ngày dự kiến trong tháng, tới hôm nay)
+    days = sorted(set(PlanLine.objects.filter(report__project=project, for_date__range=(start, end)).values_list("for_date", flat=True)))
+    plan = Sheet(book, "Kế hoạch", f"{project.code} · việc dự kiến so với thực làm tháng {first:%m/%Y}",
+                 "So gần đúng theo mã chi tiết hoặc chữ + tầng: \"chưa thấy\" là chưa có trong báo cáo ngày đó, không kết luận thay giám sát.")
+    plan.table(["Ngày dự kiến", "Người lập", "Tầng", "Việc dự kiến", "Mã", "So thực làm"],
+               [[day, row["author"], row["floor"], row["text"], row["code"], "✓ đã làm" if row["done"] else "● chưa thấy trong báo cáo"]
+                for day in days for row in plans.compare(project, day)],
+               {"Ngày dự kiến": DAY}, {"Việc dự kiến": 50, "So thực làm": 26})
+
+    # Chấm công: khối văn phòng / khối công nhân (công nhật theo tên, tổ khoán theo số người) / tổ của chủ nhà
+    grouped = timesheet.build(user, [project], start, end)
+    work = Sheet(book, "Chấm công", f"{project.code} · chấm công tháng {first:%m/%Y}",
+                 "8 giờ = 1 công. Thợ công nhật có tên, tính tiền theo đơn giá đúng ngày; tổ khoán ghi số người theo báo cáo "
+                 "(tiền ở khoản khoán); tổ của chủ nhà không tính tiền.")
     head = ["Người", "Tổ", "Loại", "Hình thức", "Tổng công", "Số ngày"]
     if cost:
         head += ["Đơn giá", "Thành tiền công nhật"]
     table = []
-    for name, v in sorted(people.items()):
-        w = v["worker"]
-        row = [name, w.team if w else "", (w.trade.name if w.trade_id else w.get_kind_display()) if w else "Giám sát",
-               w.get_pay_display() if w else "", v["days"], len(v["dates"])]
-        if cost:
-            row += [v.get("rate"), v.get("cost")]
-        table.append(row)
-    work.table(head, table, {"Tổng công": QTY, "Đơn giá": MONEY, "Thành tiền công nhật": MONEY}, {"Người": 28})
+    for section in grouped["sections"]:
+        table.append([section["title"].upper()] + [None] * (len(head) - 1))
+        for group in section["groups"]:
+            table.append([group["title"]] + [None] * (len(head) - 1))
+            for r in group["rows"]:
+                row = [r["name"], r.get("team", ""), r.get("kind") or ("Giám sát" if r["staff"] else "Số người"), r.get("pay", ""),
+                       r["total"], r["workdays"]]
+                if cost:
+                    row += [r.get("rate"), r.get("cost")]
+                table.append(row)
+            table.append([f"Cộng {group['title']}", "", "", "", group["total"], None] + ([None, None] if cost else []))
+    work.table(head, table, {"Tổng công": QTY, "Đơn giá": MONEY, "Thành tiền công nhật": MONEY}, {"Người": 34})
 
     # Thu chi trong tháng
     kinds = money.visible_kinds(user)
