@@ -5,6 +5,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from core.audit import record_save
+from core.secretscan import mask as mask_secrets
 from core.text import mask_phones
 from projects.models import projects_for
 
@@ -103,7 +104,7 @@ def cancel(user, task, reason, channel="telegram"):
 @transaction.atomic
 def add_feedback(user, text, kind=Feedback.Kind.USER, context="", channel="telegram", topic="", project=None):
     """Số điện thoại trong nội dung bị che TRƯỚC khi lưu (nên nhật ký cũng không có số)."""
-    text = mask_phones(" ".join(str(text or "").split()))
+    text = mask_secrets(mask_phones(" ".join(str(text or "").split())))
     if not text:
         raise ValidationError("Ghi nội dung góp ý, ví dụ: /gopy nút xác nhận khó bấm trên điện thoại")
     return record_save(Feedback(kind=kind, author=user, text=text[:2000], context=mask_phones(context)[:200],

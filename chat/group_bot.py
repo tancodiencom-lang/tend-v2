@@ -16,6 +16,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from assistant.models import Notice
+from core import secretscan
 from core.audit import record_save
 from projects.models import Project
 
@@ -113,6 +114,11 @@ def handle(message):
         Group.objects.filter(chat_id=chat_id).update(chat_id=str(message["migrate_to_chat_id"]))
         return
     raw = (message.get("text") or message.get("caption") or "").strip()
+    leaked = secretscan.find(raw)
+    if leaked:                    # mật khẩu/khoá trong nhóm: xoá (nếu bot là quản trị), nhắc đổi khoá, không xử lý gì thêm
+        external_id, _ = bot._sender(message)
+        bot.secret_alert(chat_id, message, external_id, leaked, chat.get("title") or "")
+        return
     called, text = addressed(message, raw)
     if raw and not text and not called and raw.startswith("/"):
         return

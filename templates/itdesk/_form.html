@@ -1,0 +1,14 @@
+<form method="post" class="row-form">{% csrf_token %}{% if a %}<input type="hidden" name="id" value="{{ a.pk }}">{% endif %}
+<label>Tài khoản / dịch vụ <input type="text" name="name" value="{{ a.name|default:'' }}" required placeholder="vd Facebook Trang tendct"></label>
+<label>Loại <select name="kind">{% for v, l in kinds %}<option value="{{ v }}"{% if a.kind == v %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+<label>Tên đăng nhập / email <input type="text" name="login" value="{{ a.login|default:'' }}"></label>
+<label>Người giữ <select name="owner"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if a.owner_id == p.pk %} selected{% endif %}>{{ p }}</option>{% endfor %}</select></label>
+<label>Mục trong Bitwarden <input type="text" name="vault_ref" value="{{ a.vault_ref|default:'' }}" placeholder="vd Tend / Facebook tendct"></label>
+<label>Dùng ở đâu <input type="text" name="used_by" value="{{ a.used_by|default:'' }}"></label>
+<label>Xác thực 2 lớp <select name="two_factor">{% for v, l in factors %}<option value="{{ v }}"{% if a.two_factor == v or not a and v == '?' %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>
+<label>Hết hạn ngày <input type="date" name="expires_on" value="{{ a.expires_on|date:'Y-m-d' }}"></label>
+<label>Đổi khoá gần nhất <input type="date" name="rotated_on" value="{{ a.rotated_on|date:'Y-m-d' }}"></label>
+<label>Đổi lại sau (ngày) <input type="number" name="rotate_days" min="0" value="{{ a.rotate_days|default:'' }}"></label>
+<label>Ghi chú <input type="text" name="note" value="{{ a.note|default:'' }}"></label>
+<label>Trạng thái <select name="active"><option value="1">Đang dùng</option><option value="0"{% if a and not a.active %} selected{% endif %}>Thôi dùng</option></select></label>
+<button class="btn" type="submit">Lưu</button></form>

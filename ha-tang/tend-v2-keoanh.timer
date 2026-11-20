@@ -1,0 +1,9 @@
+[Unit]
+Description=Keo anh Drive cho tro ly noi dung moi ngay 06:23
+
+[Timer]
+OnCalendar=*-*-* 06:23:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

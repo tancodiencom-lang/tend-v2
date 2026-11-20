@@ -24,6 +24,7 @@ from asks.models import Ask
 from assistant.models import Feedback
 from core.audit import record_save
 from core.models import User
+from core import secretscan
 from core.text import phone as phone_digits
 from core.text import vn_number
 from drawings.models import Item
@@ -35,6 +36,8 @@ from field.workers import match, recent_for
 from projects.models import Project
 
 from money import services as money
+
+from marketing import bot as marketing_bot
 
 from . import ai, group_bot, money_bot, parse, reads, task_bot, telegram
 from .models import ChatLink, ChatPhoto, ChatUpdate, GroupViewer, LinkCode, Proposal
@@ -55,7 +58,7 @@ HELP = ("Tend qua Telegram:\n"
         "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup\n"
         "• Kế toán: chụp ảnh phiếu hoặc nhắn \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng\" (loại: thu khách, thu khác, "
         "nhận hàng, khoán, trả NCC, trả tổ, trả lương, chi). Tra cứu: /thuchi hôm nay|tuần|tháng, /congno [TN-22], /baocao tuần|tháng, "
-        "/doituong <tên>. Huỷ: /huy PC12 lý do.\n" + task_bot.HELP)
+        "/doituong <tên>. Huỷ: /huy PC12 lý do.\n" + task_bot.HELP + "\n" + marketing_bot.HELP)
 
 
 # ---------- kết nối ----------
@@ -145,7 +148,8 @@ def _state(link_row, **changes):
 # ---------- lập phiếu báo cáo ----------
 
 def _unassigned_photos(link_row):
-    return list(link_row.photos.filter(proposal__isnull=True, received_at__gte=timezone.now() - PHOTO_WINDOW))
+    # Ảnh đã giao cho trợ lý nội dung (/baiviet) không gắn vào báo cáo/phiếu nữa
+    return list(link_row.photos.filter(proposal__isnull=True, received_at__gte=timezone.now() - PHOTO_WINDOW).exclude(target="noi-dung"))
 
 
 def _label(worker):
@@ -1026,6 +1030,8 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
     if command == "/yeucau":
         rows = asks.pending_for(user)
         return ("\n\n".join(asks.text(a) for a in rows) or "Không có yêu cầu báo cáo nào đang chờ anh/chị."), None
+    if command in marketing_bot.COMMANDS:
+        return marketing_bot.command(link_row, command, text), None
     if command in task_bot.COMMANDS:
         return task_bot.handle(link_row, command, text, lambda **changes: _state(link_row, **changes))
     if command == "/ngatketnoi":
@@ -1061,6 +1067,10 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
         return None, build_rate(link_row, data, text)
     state = link_row.state or {}
     if group is None and not text.startswith("/"):        # các bước đang chờ chỉ nhận ở tin riêng
+        if state.get("mkt_edit"):
+            post_id = state["mkt_edit"]
+            _state(link_row, mkt_edit=None)
+            return marketing_bot.edit_text(link_row, post_id, text), None
         if state.get("answer_question"):
             question_id = state["answer_question"]
             _state(link_row, answer_question=None)
@@ -1247,6 +1257,23 @@ def _save_photo(link_row, sizes, caption=""):
     return photo
 
 
+def secret_alert(chat_id, message, external_id, leaked, group_title=""):
+    """Trợ lý IT: tin có mật khẩu/khoá → xoá (chat riêng: bot xoá được; nhóm: cần quyền quản trị), nhắc đổi khoá, báo Giám đốc
+    (không kèm nội dung). Không ghi gì của tin vào CSDL."""
+    kinds = ", ".join(leaked)
+    removed = bool(telegram.delete(chat_id, message.get("message_id"))) if message.get("message_id") else False
+    where = f"nhóm \"{group_title}\"" if group_title else "chat riêng với bot"
+    telegram.send(chat_id, f"🔐 Trợ lý IT: tin vừa rồi có vẻ chứa {kinds}. " + ("Em đã xoá tin. " if removed else
+                  "Em không xoá được, anh/chị xoá tin ngay (Xoá cho mọi người). ")
+                  + "Tin đã đi qua máy chủ Telegram nên hãy ĐỔI mật khẩu/khoá đó, rồi lưu bản mới trong Bitwarden — không gửi qua chat.")
+    sender = ChatLink.objects.filter(external_id=str(external_id), active=True).select_related("user").first()
+    who = str(sender.user) if sender else (message.get("from") or {}).get("first_name") or "người chưa kết nối"
+    for row in ChatLink.objects.filter(active=True, user__is_active=True).select_related("user"):
+        if row.user.is_director and (sender is None or row.user_id != sender.user_id):
+            telegram.send(row.chat_id, f"🔐 Trợ lý IT: {who} vừa nhắn {kinds} trong {where}; "
+                          + ("bot đã xoá tin" if removed else "bot KHÔNG xoá được tin") + ". Nhắc đổi khoá đó và cập nhật sổ tài khoản.")
+
+
 def _error_text(error):
     return "; ".join(getattr(error, "messages", [str(error)]))
 
@@ -1263,6 +1290,10 @@ def handle_message(message):
     if chat.get("type") != "private":
         return
     text = (message.get("text") or message.get("caption") or "").strip()
+    leaked = secretscan.find(text)
+    if leaked:                    # mật khẩu/khoá: xoá tin, nhắc đổi khoá; không lưu, không gửi sang AI, không xử lý gì thêm
+        secret_alert(chat_id, message, external_id, leaked)
+        return
     found = re.fullmatch(r"/(?:start|ketnoi)\s+(\d{8})", text)
     if found:
         try:
@@ -1349,6 +1380,10 @@ def handle_callback(callback):
         telegram.answer_callback(callback.get("id", ""), "Chưa kết nối Tend.")
         return
     kind, _, value = data.partition(":")
+    if kind == "mk":
+        text = marketing_bot.callback(link_row, data, chat_id, lambda **changes: _state(link_row, **changes))
+        telegram.answer_callback(callback.get("id", ""), text[:190])
+        return
     if kind == "rp":
         text = choose_project(link_row, chat_id, value)
         telegram.answer_callback(callback.get("id", ""), text[:190])

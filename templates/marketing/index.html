@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Nội dung{% endblock %}
+{% block content %}
+<h1>Nội dung số</h1>
+<p class="muted">Mỗi ngày trợ lý tự soạn bài nháp từ ảnh báo cáo hiện trường và thư mục Drive, viết theo giọng các bài mẫu, gửi người duyệt
+qua Telegram. <b>Không bài nào tự đăng</b>: bấm Duyệt đúng bản đã xem mới đăng; sửa chữ, đổi ảnh, đổi Trang là bản mới, phải duyệt lại.
+Bài không nêu tên chủ nhà, địa chỉ, giá; ảnh đăng lên đã bỏ thông tin vị trí (GPS).</p>
+{% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+<p><a class="btn plain" href="{% url 'marketing_assets' %}">Kho ảnh ({{ asset_count }})</a>
+<a class="btn plain" href="{% url 'marketing_settings' %}">Trang đăng ({{ channels|length }}) · Giọng văn ({{ sample_count }} bài mẫu)</a></p>
+{% if not channels %}<p class="missing">Chưa có Trang Facebook nào. {% if user.is_director %}Thêm ở <a href="{% url 'marketing_settings' %}">Trang đăng</a>.{% else %}Nhờ Giám đốc thêm.{% endif %}</p>{% endif %}
+
+<h2>Giao bài, ý tưởng</h2>
+<form method="post" action="{% url 'marketing_idea_add' %}" class="row-form">{% csrf_token %}
+  <label>Nội dung <input type="text" name="text" required placeholder="vd Trước–sau phòng khách, nhấn phào chỉ trần"></label>
+  <label>Công trình <select name="project"><option value="">— tự chọn —</option>{% for p in projects %}<option value="{{ p.pk }}">{{ p.code }}</option>{% endfor %}</select></label>
+  <label class="check"><input type="checkbox" name="now" value="1" checked> Soạn bài ngay</label>
+  <button class="btn" type="submit">Giao</button>
+</form>
+{% if ideas %}<ul>{% for i in ideas %}<li>{{ i.get_kind_display }}: {{ i.text }}{% if i.project %} · {{ i.project.code }}{% endif %} <span class="muted">· {{ i.created_by }} {{ i.created_at|date:"d/m" }}</span>
+<form method="post" action="{% url 'marketing_idea_drop' i.pk %}" style="display:inline">{% csrf_token %}<button class="btn plain" type="submit">Bỏ</button></form></li>{% endfor %}</ul>{% endif %}
+
+<h2>Chờ duyệt, cần xử lý ({{ waiting|length }})</h2>
+{% for p in waiting %}{% include "marketing/_card.html" %}{% empty %}<p>Không có bài chờ duyệt.</p>{% endfor %}
+{% if going %}<h2>Đã duyệt, đang đăng</h2>{% for p in going %}{% include "marketing/_card.html" %}{% endfor %}{% endif %}
+<h2>Đã đăng 30 ngày qua</h2>
+{% for p in done %}{% include "marketing/_card.html" %}{% empty %}<p class="muted">Chưa có bài nào.</p>{% endfor %}
+{% endblock %}

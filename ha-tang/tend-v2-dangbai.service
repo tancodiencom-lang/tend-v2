@@ -1,0 +1,12 @@
+[Unit]
+Description=Tro ly noi dung (Tend moi): dang bai da duyet len Trang Facebook, doi soat, bao nguoi duyet
+After=network-online.target postgresql.service
+Wants=network-online.target
+OnFailure=tend-v2-canh-bao@%n.service
+
+[Service]
+Type=oneshot
+User=tendv2
+Group=tendv2
+WorkingDirectory=/srv/tend-v2/app
+ExecStart=/srv/tend-v2/app/.venv/bin/python manage.py dang_bai

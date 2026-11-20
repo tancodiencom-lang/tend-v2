@@ -5,6 +5,7 @@
 bấm Báo xong — ngay ở đây hoặc trên Telegram (<code>/xong số</code>). Giám đốc nhận kết quả hoặc trả lại, cũng ở đây hoặc trên Telegram.
 Trợ lý nhắc trước hạn, nhắc khi trễ và báo Giám đốc nếu vẫn trễ.</p>
 {% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
+{% if user.is_director %}<p><a class="btn plain" href="{% url 'itdesk' %}">🔐 Sổ tài khoản (trợ lý IT)</a></p>{% endif %}
 <h2>{% if user.is_director %}Việc đang mở{% else %}Việc của anh/chị{% endif %} ({{ open|length }}{% if late_count %}, ▼ trễ {{ late_count }}{% endif %})</h2>
 {% if open %}<div class="scroll"><table class="grid"><thead><tr><th>Số</th><th>Việc</th><th>Người giao</th><th>Người làm</th><th>Công trình</th><th>Hạn</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>
 {% for row in open %}{% with t=row.task %}<tr>

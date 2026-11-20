@@ -38,7 +38,8 @@ echo "== 5. Dich vu va hen gio =="
 install -m 644 "$APP/ha-tang/tend-v2.service" /etc/systemd/system/tend-v2.service
 for unit in tend-v2-canh-bao@.service tend-v2-tomtat.service tend-v2-tomtat.timer tend-v2-saoluu.service tend-v2-saoluu.timer \
             tend-v2-goc.service tend-v2-goc.timer tend-v2-kiemtra.service tend-v2-kiemtra.timer \
-            tend-v2-khoiphuc.service tend-v2-khoiphuc.timer tend-v2-troly.service tend-v2-troly.timer; do
+            tend-v2-khoiphuc.service tend-v2-khoiphuc.timer tend-v2-troly.service tend-v2-troly.timer \
+            tend-v2-dangbai.service tend-v2-dangbai.timer tend-v2-keoanh.service tend-v2-keoanh.timer; do
   install -m 644 "$APP/ha-tang/$unit" "/etc/systemd/system/$unit"
 done
 systemctl daemon-reload
@@ -48,6 +49,12 @@ systemctl enable -q --now tend-v2-kiemtra.timer tend-v2-troly.timer
 # Tom tat thu chi 18:13 da gop vao tom tat ngay 18:30 cua tro ly
 systemctl disable -q --now tend-v2-tomtat.timer 2>/dev/null || true
 echo "Da bat tro ly Giam doc (moi 10 phut: ban tin 7:30, nhac bao cao 16:00/17:00, tom tat 18:30, nhac viec, canh bao)"
+systemctl enable -q --now tend-v2-dangbai.timer tend-v2-keoanh.timer
+if grep -q '^TEND_META_TOKEN=.' "$ROOT/.env"; then
+  echo "Da bat tro ly noi dung: 08:00 soan bai nhap, dang bai da duyet moi 2 phut"
+else
+  echo "Tro ly noi dung: chua co khoa TEND_META_TOKEN trong $ROOT/.env nen bai duyet xong se bao loi 'chua co khoa' (soan nhap van chay)"
+fi
 if rclone listremotes 2>/dev/null | grep -q '^tendcrypt:$'; then
   systemctl enable -q --now tend-v2-saoluu.timer tend-v2-khoiphuc.timer
   echo "Da bat sao luu hang dem 02:30 (cung kho Drive voi ban cu, thu muc tend-v2/) va thu khoi phuc ngay 3 hang thang"

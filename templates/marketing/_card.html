@@ -1,0 +1,7 @@
+<section class="card"><header><a href="{% url 'marketing_post' p.pk %}"><b>Bài #{{ p.pk }}</b></a> · {{ p.for_date|date:"d/m/Y" }} ·
+{% if p.state == "da_dang" %}✓{% elif p.state == "loi" or p.state == "doi_soat" %}▼{% else %}●{% endif %} {{ p.get_state_display }}
+<span class="muted">· {% if p.created_by %}{{ p.created_by }}{% else %}trợ lý soạn{% endif %}{% if p.ai_written %} · AI viết{% endif %}{% if p.approved_by %} · duyệt: {{ p.approved_by }}{% endif %}</span></header>
+<div class="photos">{% for it in p.items.all|slice:":6" %}<img src="{% url 'marketing_image' it.asset_id %}?w=240" alt="Ảnh {{ forloop.counter }}" loading="lazy">{% endfor %}</div>
+<p>{{ p.text|truncatechars:240|linebreaksbr }}</p>
+{% for t in p.targets.all %}{% if t.state == "da_dang" and t.permalink %}<p>✓ {{ t.channel.name }}: <a href="{{ t.permalink }}" rel="noopener" target="_blank">xem bài</a></p>{% elif t.error %}<p class="err">{{ t.channel.name }}: {{ t.error }}</p>{% endif %}{% endfor %}
+<p><a class="btn plain" href="{% url 'marketing_post' p.pk %}">Mở bài</a></p></section>
