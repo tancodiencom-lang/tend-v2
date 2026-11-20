@@ -677,3 +677,34 @@ class BackfillTests(BotCase):
         self.assertEqual(self.entries().count(), 1)
         self.message(self.accountant, f"trả NCC 2tr Cát Hùng Vương TN-22 PC10 {d.today():%d/%m/%Y}")
         self.assertNotIn("Nhập bù", bot.summary(self.proposal()))
+
+
+class StandardReportTests(BotCase):
+    """Nhắn tự do → phiếu kèm mẫu chuẩn + link bản vẽ/bảng khối lượng; thiếu tên thợ → danh sách nhân sự để bấm."""
+
+    def test_free_report_gets_standard_text_links_and_staff_picker(self):
+        result = {"type": "final", "tool": "propose_report",
+                  "input": {"project_code": "TN-22", "lines": [{"code": "T1.2", "percent": 20}], "people": []}}
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "run", return_value=result):
+            self.message(self.site, "trát tường tầng 1 được 20%, thợ xây 3 thợ 2 phụ")
+        proposal = self.proposal()
+        summary = bot.summary(proposal)
+        self.assertIn("Lần sau nhắn theo mẫu này", summary)
+        self.assertIn("TN-22 ", summary)
+        self.assertIn("T1.2 20%", summary)
+        self.assertIn("/ban-ve/TN-22/khoi-luong/", summary)
+        buttons = self.last_buttons(self.chats[self.site.pk])
+        nam = next(data for text, data in buttons.items() if "Nam" in text)
+        self.press(self.site, nam)
+        proposal.refresh_from_db()
+        self.assertEqual([p["name"] for p in proposal.payload["people"]], ["Nam"])
+        self.assertIn("Công: Nam phụ", bot.standard_text(proposal))
+        self.press(self.site, nam)                                             # bấm lại: không thêm trùng
+        proposal.refresh_from_db()
+        self.assertEqual(len(proposal.payload["people"]), 1)
+
+    def test_standard_message_no_hint_and_role_mismatch_flagged(self):
+        self.message(self.site, "TN-22 T1.2 40% Công Nam thợ")
+        summary = bot.summary(self.proposal())
+        self.assertNotIn("Lần sau nhắn theo mẫu", summary)
+        self.assertIn("tin ghi thợ, danh sách là thợ phụ", summary)
