@@ -24,8 +24,9 @@ from chat import money_bot, telegram
 from chat.models import ChatLink, Proposal
 from core.models import Role, User
 from core.text import vn_number, vnd
+from field import crews as crew_lookup
 from field import plans
-from field.models import Attendance, ExtraWork, Report, ReportLine, Worker
+from field.models import Attendance, ExtraWork, Report, ReportLine, Team, Worker
 from money.models import Entry, Kind
 from overview import compute
 from projects.models import Project
@@ -214,7 +215,7 @@ def weekly_text(user, today, now):
     """Phần thứ Hai của bản tin sáng: mức đầy đủ báo cáo tuần trước của từng giám sát, chỗ vướng theo loại, góp ý."""
     start, end = stats.week_of(today - timedelta(days=7))
     out = [f"\n⑤ Báo cáo của giám sát tuần trước ({start:%d/%m}–{end:%d/%m}), mức đầy đủ thang 100 "
-           "(mã 25, %/KL 25, ảnh 20, tên thợ 20, không hỏi lại 10)"]
+           "(mã 25, %/KL 25, ảnh 20, nhân sự 20, không hỏi lại 10)"]
     rows = stats.supervisor_rows(user, start, end, now)
     out += [stats.line(row) for row in rows] or ["• Chưa có giám sát nào."]
     weak = [str(row["user"]) for row in rows if row["average"] is not None and row["average"] < 60]
@@ -270,7 +271,13 @@ def evening_text(user, now):
         gap = (f", {'▲ nhanh' if p['gap'] >= 0 else '▼ chậm'} {vn_number(abs(p['gap']))}% so kế hoạch" if p.get("gap") is not None else "")
         state = f"{vn_number(p['actual'])}%{gap}" if p.get("actual") is not None else p.get("missing") or "chưa tính được %"
         extra = ExtraWork.objects.filter(report__project=project, report__work_date=today).count()
-        report = (f"{reports} báo cáo, {vn_number(people)} công" + (f", {extra} việc ngoài bản vẽ" if extra else "")
+        crews = crew_lookup.for_days([project], today, today)
+        team = sum(c.total for c in crews if c.team_id and c.team.kind == Team.Kind.CONTRACT)
+        owner = sum(c.total for c in crews if c.team_id and c.team.kind == Team.Kind.OWNER)
+        unknown = sum(c.total for c in crews if not c.team_id)
+        headcount = "".join([f", tổ khoán {team} người" if team else "", f", tổ chủ nhà {owner} người" if owner else "",
+                             f", {unknown} người chưa rõ tổ" if unknown else ""])
+        report = (f"{reports} báo cáo, {vn_number(people)} công có tên" + headcount + (f", {extra} việc ngoài bản vẽ" if extra else "")
                   if reports else "● CHƯA CÓ BÁO CÁO")
         out.append(f"• {project.code}: {state}; hôm nay {report}")
         planned = plans.compare(project, today)

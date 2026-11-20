@@ -27,9 +27,10 @@ from core.models import User
 from core.text import phone as phone_digits
 from core.text import vn_number
 from drawings.models import Item
+from field import crews as crew_lookup
 from field import plans, quality
 from field import services as field
-from field.models import Attendance, Report, Worker
+from field.models import Attendance, Report, Team, Worker
 from field.workers import match, recent_for
 from projects.models import Project
 
@@ -193,14 +194,15 @@ def _work_date(data):
     return field._work_date(raw or None)
 
 
-def _ask(proposal, topic, text, key=None, log=True):
+def _ask(proposal, topic, text, key=None, log=True, count=True):
     """Bot phải hỏi lại người gửi: đếm vào phiếu (mức đầy đủ của báo cáo) và ghi chỗ vướng để thống kê. Mỗi `key` một lần.
-    `log=False`: chỗ vướng đã ghi lúc hỏi (trước khi có phiếu), chỉ đếm."""
+    `log=False`: chỗ vướng đã ghi lúc hỏi (trước khi có phiếu), chỉ đếm. `count=False`: câu hỏi khai báo lần đầu (tổ mới),
+    ghi chỗ vướng nhưng không trừ điểm báo cáo."""
     asks = list(proposal.payload.get("asks") or [])
     key = key or f"{topic}:{len(asks)}"
     if any(a.get("key") == key for a in asks):
         return
-    asks.append({"topic": topic, "key": key})
+    asks.append({"topic": topic, "key": key, **({} if count else {"count": False})})
     proposal.payload = {**proposal.payload, "asks": asks}
     proposal.save(update_fields=["payload"])
     if log:
@@ -230,6 +232,48 @@ def _plan(project, items, work_date, data):
         day = day.replace(year=day.year + 1)
     day = field._plan_date(day, work_date)
     return {"date": day.isoformat(), "lines": rows}
+
+
+def _team_label(team):
+    return f"tổ {team.name} ({'của chủ nhà' if team.kind == Team.Kind.OWNER else 'khoán của ta'})"
+
+
+def _crew(row, project, can_add):
+    """Một nhóm "tổ xây: 3 thợ 2 phụ" → dòng số người theo tổ trong phiếu: rõ tổ / hỏi (gần giống) / tổ mới (hỏi loại) /
+    chưa rõ tổ (tin không ghi tên tổ). Tổ mới mà tin ghi "của chủ nhà" thì lập sẵn tổ của chủ nhà, không hỏi."""
+    counts = {k: max(0, min(500, int(row.get(k) or 0))) for k in ("skilled", "helpers", "others")}
+    if not sum(counts.values()):
+        return None
+    name = crew_lookup.clean_name(row.get("team"))
+    entry = {"name": name, **counts, "work": " ".join(str(row.get("work") or "").split())[:300], "owner": bool(row.get("owner"))}
+    if not name:
+        entry["status"] = "none"
+        return entry
+    found = crew_lookup.match_team(name, project)
+    if found.get("team"):
+        entry.update(status="ok", team_id=found["team"].pk, label=_team_label(found["team"]), kind=found["team"].kind)
+    elif found.get("candidates"):
+        entry.update(status="ask", candidates=[{"id": t.pk, "label": _team_label(t)} for t in found["candidates"]])
+    elif entry["owner"] and can_add:
+        entry.update(status="new_ok", new={"name": name, "kind": Team.Kind.OWNER}, label=f"tổ {name} (của chủ nhà, tổ mới)",
+                     kind=Team.Kind.OWNER)
+    else:
+        entry["status"] = "new"
+    return entry
+
+
+def unresolved_teams(proposal):
+    return [(i, c) for i, c in enumerate(proposal.payload.get("crews") or []) if c.get("status") in ("ask", "new")]
+
+
+def crew_line(row):
+    """"tổ xây (khoán của ta): 5 người (3 thợ, 2 phụ) · đi dây tầng 3"."""
+    total = row["skilled"] + row["helpers"] + row["others"]
+    parts = [f"{row['skilled']} thợ" if row["skilled"] else "", f"{row['helpers']} phụ" if row["helpers"] else ""]
+    detail = ", ".join(x for x in parts if x)
+    who = {"ok": row.get("label"), "new_ok": row.get("label"), "none": "chưa rõ tổ nào"}.get(row["status"]) or f"tổ \"{row['name']}\" ?"
+    text = f"{who}: {total} người" + (f" ({detail})" if detail and (row["helpers"] or row["others"]) else "")
+    return text + (f" · {row['work']}" if row.get("work") else "")
 
 
 def build_report(link_row, data, source_text):
@@ -278,12 +322,14 @@ def build_report(link_row, data, source_text):
     can_add = field.can_add_workers(user)
     people = [_person(p, project, work_date, can_add) for p in data.get("people") or [] if str(p.get("name") or "").strip()]
     photos = _unassigned_photos(link_row)
-    crew = " ".join(str(data.get("crew") or "").split())[:200]
-    free = data.get("via") == "ai" or bool(data.get("unread") or extra or (crew and not people) or data.get("asked_project"))
+    crews = [_crew(row, project, can_add) for row in data.get("crews") or []]
+    crews = [row for row in crews if row is not None]
+    free = data.get("via") == "ai" or bool(data.get("unread") or extra or any(c["status"] == "none" for c in crews)
+                                           or data.get("asked_project"))
     via = "ai" if data.get("via") == "ai" else "tu_do" if free else "ngan"
     payload = {"work_date": work_date.isoformat(), "note": str(data.get("note") or "")[:5000], "lines": lines, "people": people,
-               "extra": extra, "via": via, "asks": []}
-    for key, value in (("plan", plan), ("crew", crew), ("unread", str(data.get("unread") or "")[:200]), ("free", free)):
+               "extra": extra, "crews": crews, "via": via, "asks": []}
+    for key, value in (("plan", plan), ("unread", str(data.get("unread") or "")[:200]), ("free", free)):
         if value:
             payload[key] = value
     with transaction.atomic():
@@ -338,6 +384,8 @@ def blockers(proposal):
         out.append("chọn chi tiết cho ảnh")
     if unresolved_people(proposal):
         out.append("xác định người")
+    if unresolved_teams(proposal):
+        out.append("xác định tổ")
     if needs_reason(proposal):
         out.append("nhắn lý do")
     return out
@@ -381,10 +429,9 @@ def summary(proposal):
         people = p.get("people") or []
         author = proposal.link.user
         role = "giám đốc" if author.is_director else author.get_role_display().lower()
-        out.append(f"Chấm công: {author} ({role}, có mặt)" + (f" + {len(people)} người:" if people else ", chưa có thợ nào"))
-        if p.get("crew"):
-            out.append(f"Nhân sự theo tin: {p['crew']} (không có tên nên không tính công"
-                       + (")" if people else "; bấm tên từng người ở danh sách bot gửi)"))
+        crews = p.get("crews") or []
+        out.append(f"Chấm công: {author} ({role}, có mặt)" + (f" + {len(people)} người có tên:" if people
+                                                              else ", chưa có thợ nào" if not crews else ""))
         for person in people:
             days = vn_number(Decimal(person["days"]))
             if person["status"] == "ok":
@@ -402,6 +449,15 @@ def summary(proposal):
             if person.get("warning"):
                 line += f" ⚠ {person['warning']}"
             out.append(line)
+        if crews:
+            out.append("Số người theo tổ (không cần tên; tổ khoán tính tiền ở khoản khoán, tổ của chủ nhà không tính tiền):")
+            for row in crews:
+                line = "• " + crew_line(row)
+                if row["status"] == "none":
+                    line += " — lần sau ghi tên tổ, vd \"tổ xây: 3 thợ 2 phụ\"; thợ công nhật thì ghi tên từng người"
+                elif row["status"] in ("ask", "new"):
+                    line += " — bấm chọn ở tin bot hỏi"
+                out.append(line)
         common = proposal.photos.filter(target="").count()
         if common:
             out.append(f"Ảnh chung: {common}")
@@ -483,7 +539,14 @@ def standard_text(proposal):
     people = "; ".join(", ".join(names) for names in groups.values())
     out = [f"{proposal.project.code} {_day(p['work_date'])} {work or '<mã chi tiết> <%>'}"]
     out += [f"+ {extra_label(row)}" for row in p.get("extra") or [] if not row.get("code")]
-    out.append(f"Công: {people}" if people else "Công: <tên thợ> thợ; <tên> phụ")
+    crews = [c for c in p.get("crews") or [] if c["status"] != "none"]
+    if crews:
+        out.append("Nhân sự: " + "; ".join(
+            f"tổ {c['name']}" + (" (chủ nhà)" if c.get("kind") == Team.Kind.OWNER else "")
+            + "".join(f" {n} {w}" for n, w in ((c["skilled"], "thợ"), (c["helpers"], "phụ"), (c["others"], "người")) if n)
+            for c in crews))
+    if people or not crews:
+        out.append(f"Công: {people}" if people else "Công: <tên thợ công nhật> thợ; <tên> phụ")
     if p.get("plan"):
         out.append(f"Dự kiến {_day(p['plan']['date'])}: " + "; ".join(row["description"] for row in p["plan"]["lines"]))
     return "\n".join(out)
@@ -493,20 +556,24 @@ def offer_staff(chat_id, proposal):
     """Báo cáo chưa có tên thợ nào: đưa danh sách nhân sự (người làm ở công trình gần đây trước) để bấm thêm."""
     if proposal.kind != Proposal.Kind.REPORT or proposal.payload.get("people") or proposal.payload.get("offered"):
         return
+    crews = proposal.payload.get("crews") or []
+    if any(c["status"] != "none" for c in crews):      # đã có số người theo tổ: tổ khoán, tổ chủ nhà không cần tên
+        return
     recent = recent_for(proposal.project)
     staff = sorted(Worker.objects.filter(active=True).exclude(pay=Worker.Pay.MONTHLY).select_related("trade"),
                    key=lambda w: (w.pk not in recent, w.code or "", w.name))[:16]
     short = str(proposal.pk)[:8]
-    text = (f"Báo cáo chưa có tên thợ nên chưa chấm công được. Bấm từng người làm hôm nay ở {proposal.project.code} "
-            f"(mỗi người 1 công; nửa ngày thì nhắn lại). Danh sách đầy đủ: {settings.APP_URL}/tho/")
+    text = (f"Báo cáo chưa có tên thợ nên chưa chấm công được. Thợ CÔNG NHẬT: bấm từng người làm hôm nay ở {proposal.project.code} "
+            f"(mỗi người 1 công; nửa ngày thì nhắn lại). Tổ khoán, tổ của chủ nhà: không cần tên, nhắn số người theo tổ, vd "
+            f"\"tổ xây: 3 thợ 2 phụ; tổ điện chủ nhà 2 người\". Danh sách đầy đủ: {settings.APP_URL}/tho/")
     if not staff:
         telegram.send(chat_id, text + "\nChưa có ai trong danh sách nhân sự: nhắn lại kèm tên, vd \"Công: Thắng phụ, Thuận thợ\".")
     else:
         telegram.send(chat_id, text, [[{"text": "＋ " + _label(w), "data": f"pa:{short}:{w.pk}"}] for w in staff])
     proposal.payload = {**proposal.payload, "offered": True}
     proposal.save(update_fields=["payload"])
-    crew = proposal.payload.get("crew")
-    _ask(proposal, Feedback.Topic.NO_STAFF, "Báo cáo không có tên thợ" + (f" (tin ghi \"{crew}\")" if crew else "")
+    crew = "; ".join(crew_line(c) for c in crews)
+    _ask(proposal, Feedback.Topic.NO_STAFF, "Báo cáo không có tên thợ, không có tổ" + (f" (tin ghi \"{crew}\")" if crew else "")
          + ", bot đưa danh sách nhân sự để bấm", "staff")
 
 
@@ -575,11 +642,66 @@ def ask_people(chat_id, proposal):
         proposal.save(update_fields=["payload"])
 
 
+def ask_teams(chat_id, proposal):
+    """Tổ mới hoặc tên tổ gần giống: hỏi một lần mỗi tổ — chọn tổ có sẵn, hoặc thêm tổ khoán của ta / tổ của chủ nhà."""
+    asked = set(proposal.payload.get("asked_teams") or [])
+    for index, row in unresolved_teams(proposal):
+        if str(index) in asked:
+            continue
+        key = f"{str(proposal.pk)[:8]}:{index}"
+        buttons = [[{"text": c["label"], "data": f"tm:{key}:{c['id']}"}] for c in row.get("candidates") or []]
+        buttons.append([{"text": "＋ Tổ khoán của ta", "data": f"tm:{key}:k"}, {"text": "＋ Tổ của chủ nhà", "data": f"tm:{key}:c"}])
+        buttons.append([{"text": "Không rõ tổ", "data": f"tm:{key}:x"}])
+        text = (f"\"tổ {row['name']}\" là tổ nào ở {proposal.project.code}?" if row["status"] == "ask" else
+                f"\"tổ {row['name']}\" chưa có ở {proposal.project.code}. Tổ khoán của ta (tính chi phí khoán) hay tổ của chủ nhà "
+                "(chủ nhà ký trực tiếp, chỉ ghi để phối hợp)?")
+        telegram.send(chat_id, text, buttons)
+        asked.add(str(index))
+        _ask(proposal, Feedback.Topic.TEAM, f"Tổ \"{row['name']}\" " + ("gần giống tổ có sẵn" if row["status"] == "ask"
+                                                                       else "chưa có ở công trình") + ", bot hỏi là tổ nào",
+             f"team:{index}", count=row["status"] == "ask")
+    if asked != set(proposal.payload.get("asked_teams") or []):
+        proposal.payload = {**proposal.payload, "asked_teams": sorted(asked)}
+        proposal.save(update_fields=["payload"])
+
+
+@transaction.atomic
+def choose_team(link_row, short_id, index, choice):
+    proposal = _pending(link_row, short_id)
+    if proposal is None:
+        return "Phiếu không còn chờ.", None
+    crews = [dict(c) for c in proposal.payload.get("crews") or []]
+    if not index.isdecimal() or int(index) >= len(crews) or crews[int(index)]["status"] not in ("ask", "new"):
+        return "Tổ này đã được chọn.", None
+    row = crews[int(index)]
+    if choice == "x":
+        row.update(status="none", candidates=[])
+        text = f"✓ Ghi {row['name']} là chưa rõ tổ"
+    elif choice in ("k", "c"):
+        if not field.can_add_workers(link_row.user):
+            return "Anh/chị không được thêm tổ.", None
+        kind = Team.Kind.OWNER if choice == "c" else Team.Kind.CONTRACT
+        row.update(status="new_ok", new={"name": row["name"], "kind": kind}, kind=kind, candidates=[],
+                   label=f"tổ {row['name']} ({'của chủ nhà' if kind == Team.Kind.OWNER else 'khoán của ta'}, tổ mới)")
+        text = f"✓ Thêm {row['label']}"
+    elif choice.isdecimal() and int(choice) in {c["id"] for c in row.get("candidates") or []}:
+        team = Team.objects.get(pk=int(choice))
+        row.update(status="ok", team_id=team.pk, label=_team_label(team), kind=team.kind, candidates=[])
+        text = f"✓ {row['label']}"
+    else:
+        return "Lựa chọn không hợp lệ.", None
+    crews[int(index)] = row
+    proposal.payload = {**proposal.payload, "crews": crews}
+    proposal.save(update_fields=["payload"])
+    return text, proposal
+
+
 def _proposal_reply(chat_id, proposal):
     telegram.send(chat_id, summary(proposal), _buttons(proposal))
     if proposal.kind == Proposal.Kind.REPORT:
         ask_photos(chat_id, proposal)
         ask_people(chat_id, proposal)
+        ask_teams(chat_id, proposal)
         offer_staff(chat_id, proposal)
     elif proposal.kind == Proposal.Kind.MONEY:
         money_bot.ask(chat_id, proposal, reads.projects(proposal.link.user))
@@ -768,7 +890,10 @@ def decide(link_row, proposal_id, confirm):
                 report = field.submit_report(user, proposal.project, {
                     "work_date": p["work_date"], "note": p.get("note", ""), "lines": p.get("lines") or [], "attendance": attendance,
                     "extra": p.get("extra") or [], "plan": p.get("plan") or {}, "via": p.get("via", ""),
-                    "asked": len(p.get("asks") or []), "named": named, "crew": p.get("crew", "")},
+                    "asked": sum(1 for a in p.get("asks") or [] if a.get("count", True)), "named": named,
+                    "crews": [{"team_id": c.get("team_id"), "new": c.get("new"), "skilled": c["skilled"], "helpers": c["helpers"],
+                               "others": c["others"], "work": c.get("work", "")}
+                              for c in p.get("crews") or [] if c["status"] in ("ok", "new_ok", "none")]},
                     files, client_key=proposal.pk, channel="telegram")
                 result = {"report": report.pk, "url": f"/ban-ve/{proposal.project.code}/"}
             elif proposal.kind == Proposal.Kind.FIX:
@@ -826,7 +951,8 @@ def notify_directors(proposal, author, report=None, score=None):
         f"BÁO CÁO {proposal.project.code} · {author} · {_day(p['work_date'])}",
         f"Tiến độ: {lines}" if lines else "",
         f"Việc ngoài bản vẽ: {extra}" if extra else "",
-        f"Chấm công: giám sát + {len(people)} người" + (f" · nhân sự theo tin: {p['crew']}" if p.get("crew") else ""),
+        f"Chấm công: giám sát + {len(people)} người có tên",
+        ("Số người theo tổ: " + "; ".join(crew_line(c) for c in p.get("crews") or [])) if p.get("crews") else "",
         (f"So kế hoạch {_day(p['work_date'])}: {len(compared) - len(left)}/{len(compared)} việc đã làm"
          + (f"; chưa thấy: {'; '.join(left[:6])}" if left else "")) if compared else "",
         (f"Kế hoạch {_day(plan['date'])}: " + "; ".join(row["description"] for row in plan["lines"][:8])) if plan else "",
@@ -1187,17 +1313,18 @@ def handle_callback(callback):
         if proposal is not None:
             telegram.send(chat_id, summary(proposal), _buttons(proposal))
         return
-    if kind in ("ph", "wk"):
+    if kind in ("ph", "wk", "tm"):
         if kind == "ph":
             photo_id, _, choice = value.partition(":")
             text, proposal = choose_photo(link_row, photo_id, choice) if photo_id.isdecimal() else ("Lựa chọn không hợp lệ.", None)
         else:
             short_id, index, choice = (value.split(":") + ["", ""])[:3]
-            text, proposal = choose_person(link_row, short_id, index, choice)
+            text, proposal = (choose_person if kind == "wk" else choose_team)(link_row, short_id, index, choice)
         telegram.answer_callback(callback.get("id", ""), text)
         if message.get("message_id") and text.startswith("✓"):
             (telegram.edit_caption if kind == "ph" else lambda c, m, t: telegram.edit(c, m, t))(chat_id, message["message_id"], text)
-        if proposal is not None and not proposal.photos.filter(target="?").exists() and not unresolved_people(proposal):
+        if (proposal is not None and not proposal.photos.filter(target="?").exists() and not unresolved_people(proposal)
+                and not unresolved_teams(proposal)):
             telegram.send(chat_id, summary(proposal), _buttons(proposal))
         return
     if kind in ("mp", "mj", "md"):

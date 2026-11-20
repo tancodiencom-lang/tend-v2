@@ -46,7 +46,7 @@ def supervisor_rows(viewer, start, end, now=None):
         return []
     begin, finish = _span(start, end)
     reports = (Report.objects.filter(work_date__range=(start, end), author__in=users).select_related("project", "author")
-               .prefetch_related("lines", "extra_work", "photos").order_by("work_date", "created_at"))
+               .prefetch_related("lines", "extra_work", "photos", "crews").order_by("work_date", "created_at"))
     by_user = {u.pk: [] for u in users}
     for report in reports:
         by_user[report.author_id].append((report, quality.of(report)))
@@ -73,8 +73,8 @@ def supervisor_rows(viewer, start, end, now=None):
                 misses["% hoặc khối lượng"] += 1
             if not s.photos:
                 misses["ảnh"] += 1
-            if not s.named:
-                misses["tên thợ"] += 1
+            if s.staff < 20:
+                misses["nhân sự"] += 1
         out.append({"user": user, "reports": rows, "count": len(rows), "scored": len(scored), "average": average,
                     "label": quality.label(average), "misses": misses, "asked": sum(r.asked for r, _ in rows),
                     "extra": sum(len(r.extra_work.all()) for r, _ in rows), "dropped": dropped.get(user.pk, 0),
@@ -85,7 +85,8 @@ def supervisor_rows(viewer, start, end, now=None):
 
 def advice(row):
     """"thiếu tên thợ 4/5, không ảnh 3/5" — các tiêu chí hay thiếu nhất trước."""
-    words = {"mã chi tiết": "thiếu mã chi tiết", "% hoặc khối lượng": "thiếu %/khối lượng", "ảnh": "không ảnh", "tên thợ": "không tên thợ"}
+    words = {"mã chi tiết": "thiếu mã chi tiết", "% hoặc khối lượng": "thiếu %/khối lượng", "ảnh": "không ảnh",
+             "nhân sự": "thiếu nhân sự (tên công nhật/tổ + số người)"}
     return ", ".join(f"{words[k]} {n}/{row['scored']}" for k, n in row["misses"].most_common())
 
 

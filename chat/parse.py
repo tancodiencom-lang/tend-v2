@@ -16,7 +16,7 @@ LINE = re.compile(r"(?<![\w.-])([A-Za-z]{1,3}[0-9M]\d*(?:\.\d+)+)\s*[:=]?\s*(?:(
 CODE = re.compile(r"(?<![\w.-])([A-Za-z]{1,3}[0-9M]\d*(?:\.\d+)+)(?![\w.])")
 # Bắt đầu phần chấm công: "Công:", "Công Thắng…", "Chấm công:", "Công nhân: …" (không nhầm "công trình", "công việc",
 # "nhân công"…)
-PEOPLE_START = re.compile(r"(?<!\w)(?<!nhân )(?<!nhan )(?:chấm công|cham cong|công nhân|cong nhan|công|cong)(?!\w)"
+PEOPLE_START = re.compile(r"(?<!\w)(?<!nhân )(?<!nhan )(?<!\d )(?<!\d)(?:chấm công|cham cong|công nhân|cong nhan|công|cong)(?!\w)"
                           r"(?!\s*(?:trình|trinh|việc|viec|tác|tac|ty|nhật|nhat|đoạn|doan)(?!\w))\s*:?", re.I)
 TODAY = re.compile(r"^\s*(?:hôm nay|hom nay|hn)\s*:?\s*", re.I)
 TEAM = re.compile(r"^\s*(?:to|tổ)\s+([^:]{1,40}):\s*", re.I)
@@ -42,8 +42,14 @@ PLAN_START = re.compile(r"(?<!\w)(?:(?:cv|công việc|cong viec|việc|viec)\s+
                         r"(?:\s+(?:làm|lam))?(?:\s+(?:ngày mai|ngay mai|mai))?(?!\w)"
                         r"|(?:^|\n|\s[-–]\s|[+•])\s*(?:kế hoạch|ke hoach|việc ngày mai|viec ngay mai|ngày mai|ngay mai)(?!\w)", re.I)
 CREW_START = re.compile(r"^\s*(?:nhân sự|nhan su|nhân công|nhan cong|nhân lực|nhan luc|lao động|lao dong)(?!\w)\s*:?\s*", re.I)
-HEADCOUNT = re.compile(r"(?<![\w.])\d{1,3}\s*(?:thợ chính|tho chinh|thợ phụ|tho phu|thợ|tho|phụ|phu|người|nguoi|công nhân|cong nhan|"
-                       r"cn|lao động|lao dong)(?!\w)", re.I)
+COUNT_WORDS = (r"thợ chính|tho chinh|thợ phụ|tho phu|thợ|tho|phụ|phu|người|nguoi|công nhân|cong nhan|cn|lao động|lao dong")
+HEADCOUNT = re.compile(rf"(?<![\w.])\d{{1,3}}\s*(?:{COUNT_WORDS})(?!\w)", re.I)
+COUNT = re.compile(rf"(?<![\w.])(\d{{1,3}})\s*({COUNT_WORDS})(?!\w)", re.I)
+CREW_GROUP = re.compile(rf"(?P<label>[^\d;]*?)\s*:?\s*(?P<counts>(?<![\w.])\d{{1,3}}\s*(?:{COUNT_WORDS})(?!\w)"
+                        rf"(?:\s*(?:,|\+|và|va)?\s*\d{{1,3}}\s*(?:{COUNT_WORDS})(?!\w))*)", re.I)
+OWNER = re.compile(r"\(?\s*(?:của\s+|cua\s+)?(?:chủ nhà|chu nha|chủ đầu tư|chu dau tu|cđt|cdt)\s*\)?", re.I)
+CREW_LABEL_NOISE = re.compile(r"(?<!\w)(?:nhân sự|nhan su|nhân công|nhan cong|nhân lực|nhan luc|lao động|lao dong|gồm|gom|có|co)(?!\w)",
+                              re.I)
 HEAD_WORDS = re.compile(r"(?<!\w)(?:báo cáo|bao cao|bc|cv|công việc|cong viec|việc|viec|hôm nay|hom nay|hn|ngày|ngay|tiến độ|tien do|"
                         r"chấm công|cham cong|đã làm|da lam|dự kiến|du kien|làm|lam|kế hoạch|ke hoach|mai|ngày mai|ngay mai)(?!\w)", re.I)
 FLOOR = re.compile(r"(?<!\w)(?:tầng|tang|lầu|lau|t)\s*\.?\s*(\d{1,2})(?![\d.,%\w])"
@@ -101,9 +107,60 @@ def people_start(text, line_re=LINE):
     return marks[-1]
 
 
-def names(rest, project_code=None):
+def crew_items(text):
+    """"tổ xây: 3 thợ 2 phụ, tổ điện (chủ nhà) 2 người đi dây tầng 3" → [{team, skilled, helpers, others, owner, work}].
+    Không tên tổ ("3 thợ 2 phụ") thì team rỗng. Việc tổ làm chỉ lấy ở nhóm cuối (chữ sau số người)."""
+    out, matches = [], list(CREW_GROUP.finditer(text))
+    for index, m in enumerate(matches):
+        label = m.group("label")
+        owner = bool(OWNER.search(label))
+        label = CREW_LABEL_NOISE.sub(" ", OWNER.sub(" ", label))
+        item = {"team": " ".join(label.strip(" :.,;-+()").split())[:100], "skilled": 0, "helpers": 0, "others": 0,
+                "owner": owner, "work": ""}
+        for number_, word in COUNT.findall(m.group("counts")):
+            word = fold(word)
+            key = "helpers" if word.endswith("phu") else "skilled" if word.startswith("tho") else "others"
+            item[key] += int(number_)
+        if index == len(matches) - 1:
+            tail = text[m.end():]
+            if OWNER.search(tail):
+                item["owner"] = True
+                tail = OWNER.sub(" ", tail)
+            tail = " ".join(tail.strip(" :.,;-+()").split())
+            if _words(tail) >= 2:
+                item["work"] = tail[:300]
+        if item["skilled"] + item["helpers"] + item["others"]:
+            out.append(item)
+    return out
+
+
+def merge_crews(items):
+    """Gộp cùng tổ (cùng tên bỏ dấu): "tổ xây 3 thợ, 2 phụ" tách dấu phẩy thành hai nhóm."""
+    merged = {}
+    for item in items:
+        key = fold(item["team"])
+        if key in merged:
+            row = merged[key]
+            for k in ("skilled", "helpers", "others"):
+                row[k] += item[k]
+            row["owner"] = row["owner"] or item["owner"]
+            row["work"] = row["work"] or item["work"]
+        else:
+            merged[key] = dict(item)
+    return list(merged.values())
+
+
+def _crew_segment(segment):
+    """Một dòng là số người theo tổ: có "N thợ/phụ/người" và (ít chữ khác, hoặc mở đầu "tổ…", hoặc ghi của chủ nhà)."""
+    if not HEADCOUNT.search(segment):
+        return False
+    return (_words(HEADCOUNT.sub(" ", segment)) <= 3 or bool(re.match(r"\s*(?:tổ|to)\s", segment, re.I))
+            or bool(OWNER.search(segment)))
+
+
+def names(rest, project_code=None, crews=None):
     """Phần sau dấu hiệu chấm công: "tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ" → [{name, team, days|hours, kind?}].
-    Chỉ có số người ("3 thợ 2 phụ") thì không phải tên: bỏ qua (ghi ở nhân sự theo tin)."""
+    Chỉ có số người ("tổ xây 3 thợ 2 phụ") thì không phải tên: thêm vào `crews` (số người theo tổ)."""
     if project_code:              # "chấm công hôm nay TN-22: Hùng…": mã công trình không phải tên người
         rest = re.sub(rf"(?<![\w-]){re.escape(project_code)}(?![\w-])\s*:?", " ", rest, flags=re.I)
     rest = TODAY.sub("", rest, count=1)
@@ -113,9 +170,15 @@ def names(rest, project_code=None):
         t = TEAM.match(group)
         if t:
             team, group = " ".join(t.group(1).split()), group[t.end():]
+        if crews is not None and HEADCOUNT.search(group) and not re.search(r"[^\W\d_]{2,}", HEADCOUNT.sub(" ", group).replace(
+                "chủ nhà", "").replace(team, "") if team else HEADCOUNT.sub(" ", group)):
+            crews += crew_items(f"{team}: {group}" if team else group)   # "tổ xây: 3 thợ 2 phụ" trong phần chấm công
+            continue
         for part in re.split(r",|\bva\b|\bvà\b", group):
             part = part.strip(" .:-+")
             if not part or HEADCOUNT.search(part):
+                if part and crews is not None:
+                    crews += crew_items(f"{team}: {part}" if team else part)
                 continue
             entry = {"team": team}
             for pattern, key in ((HALF, None), (HOURS, "hours"), (DAYS, "days")):
@@ -234,7 +297,7 @@ def sections(text, line_re=LINE):
 
 
 def report(text, projects, today=None, codes=None, strict=False):
-    """Tin báo cáo → {project_code, lines, people, extra, plan, crew, work_date, unread, free, note} hoặc None.
+    """Tin báo cáo → {project_code, lines, people, extra, plan, crews, work_date, unread, free, note} hoặc None.
     `codes(project)`: mã chi tiết đang dùng của công trình (để đọc mã không có dấu chấm như D179).
     `strict` (nghe tin trong nhóm): tin gạch đầu dòng chỉ là báo cáo khi mở đầu "Báo cáo…/Công việc…" hoặc có mã chi tiết.
     Không có mã công trình mà người gửi có nhiều công trình: trả {needs_project: True} để bot hỏi."""
@@ -244,8 +307,8 @@ def report(text, projects, today=None, codes=None, strict=False):
     line_re, code_re = line_pattern(known), code_pattern(known)
     body, who_text, plan_text = sections(text, line_re)
     free = bool(REPORT_HEAD.match(text) or BULLETED.search(text.strip()))
-    lines, extra, crew, unread, work_date = [], [], [], [], None
-    who = names(who_text, code) if who_text else []
+    lines, extra, crews, unread, work_date = [], [], [], [], None
+    who = names(who_text, code, crews) if who_text else []
     for raw in SEGMENT.split(body):
         segment = raw.strip(" \t-–+•*")
         if not segment:
@@ -254,9 +317,9 @@ def report(text, projects, today=None, codes=None, strict=False):
         if crew_head and not line_re.search(segment):
             rest = segment[crew_head.end():]
             if HEADCOUNT.search(rest):
-                crew.append(_clean(rest))
+                crews += crew_items(rest)
             else:
-                who += names(rest, code)
+                who += names(rest, code, crews)
             continue
         matches = [m for m in line_re.finditer(segment) if not code or m.group(1).casefold() != code.casefold()]
         if work_date is None:
@@ -272,8 +335,8 @@ def report(text, projects, today=None, codes=None, strict=False):
             continue
         if _header_only(segment, code):
             continue
-        if HEADCOUNT.search(segment) and _words(HEADCOUNT.sub(" ", segment)) <= 2:
-            crew.append(_clean(segment))          # "thợ xây 3 thợ 2 phụ" đứng riêng một dòng
+        if _crew_segment(segment):
+            crews += crew_items(segment)            # "thợ xây 3 thợ 2 phụ", "tổ điện (chủ nhà) 2 người" đứng riêng một dòng
             continue
         item = _work_item(segment) if free else None
         if item:
@@ -287,7 +350,8 @@ def report(text, projects, today=None, codes=None, strict=False):
         elif re.search(r"[^\W\d_]{2,}", segment):
             unread.append(_clean(segment))
     planned = plan(plan_text, today, code_re) if plan_text else None
-    if not lines and not who and not extra and not planned:
+    crews = merge_crews(crews)
+    if not lines and not who and not extra and not planned and not crews:
         return None
     if strict and not lines and not REPORT_HEAD.match(text):
         return None
@@ -296,8 +360,8 @@ def report(text, projects, today=None, codes=None, strict=False):
     out = {"project_code": code, "lines": lines, "people": who, "note": text.strip()[:2000], "extra": extra}
     if planned:
         out["plan"] = planned
-    if crew:
-        out["crew"] = "; ".join(crew)[:200]
+    if crews:
+        out["crews"] = crews
     if work_date:
         out["work_date"] = work_date
     if free:

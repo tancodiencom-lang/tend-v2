@@ -28,8 +28,8 @@ Trợ lý nhắc trước hạn, nhắc khi trễ và báo Giám đốc nếu v�
 {% if closed %}<h2>Đã đóng trong 30 ngày</h2><ul>{% for row in closed %}<li>{{ row.line }}</li>{% endfor %}</ul>{% endif %}
 {% if quality %}<h2 id="bao-cao">{% if user.is_director %}Mức đầy đủ báo cáo của giám sát{% else %}Mức đầy đủ báo cáo của anh/chị{% endif %}
 · tuần {{ week.start|date:"d/m" }}–{{ week.end|date:"d/m/Y" }}</h2>
-<p class="muted">Thang 100: mã chi tiết 25, % hoặc khối lượng 25, có ảnh 20, có tên thợ 20, bot không phải hỏi lại 10 (mỗi lần hỏi lại
-trừ 5). Trung bình ≥ 80: ▲ tốt; 60–79: ● được; dưới 60: ▼ cần hướng dẫn. Báo cáo chỉ chấm công/ảnh không chấm điểm.
+<p class="muted">Thang 100: mã chi tiết 25, % hoặc khối lượng 25, có ảnh 20, nhân sự đủ 20 (thợ công nhật có tên; tổ khoán, tổ chủ nhà
+chỉ cần tên tổ + số người; chỉ có số người mà không rõ tổ được 10), bot không phải hỏi lại 10 (mỗi lần hỏi lại trừ 5). Trung bình ≥ 80: ▲ tốt; 60–79: ● được; dưới 60: ▼ cần hướng dẫn. Báo cáo chỉ chấm công/ảnh không chấm điểm.
 <a href="?tuan={{ week.prev|date:'Y-m-d' }}#bao-cao">← Tuần trước</a>{% if week.next %} · <a href="?tuan={{ week.next|date:'Y-m-d' }}#bao-cao">Tuần sau →</a>{% endif %}</p>
 <div class="scroll"><table class="grid"><thead><tr><th>Giám sát</th><th>Báo cáo</th><th>Điểm TB</th><th>Hay thiếu</th><th>Bot hỏi lại</th><th>Việc ngoài bản vẽ</th><th>Phiếu bỏ/hết hạn</th></tr></thead><tbody>
 {% for row in quality %}<tr><td>{{ row.user }}</td><td>{{ row.count }}{% if row.count != row.scored %} ({{ row.scored }} chấm điểm){% endif %}</td>
@@ -37,7 +37,7 @@ trừ 5). Trung bình ≥ 80: ▲ tốt; 60–79: ● được; dưới 60: ▼ 
 <td>{{ row.advice|default:"—" }}</td><td>{{ row.asked }} lần</td><td>{{ row.extra }}</td><td>{{ row.dropped }}</td></tr>{% endfor %}
 </tbody></table></div>
 {% for row in quality %}{% if row.reports %}<details><summary>Từng báo cáo của {{ row.user }} ({{ row.count }})</summary><ul>
-{% for item in row.reports %}{% with r=item.0 s=item.1 %}<li>{{ r.work_date|date:"d/m" }} · {{ r.project.code }} · {% if s %}{{ s.total }}/100 {{ s.label }}{% if s.missing %} — {{ s.missing|join:"; " }}{% endif %}{% else %}chỉ chấm công/ảnh{% endif %}{% if r.crew %} · nhân sự theo tin: {{ r.crew }}{% endif %}</li>{% endwith %}{% endfor %}
+{% for item in row.reports %}{% with r=item.0 s=item.1 %}<li>{{ r.work_date|date:"d/m" }} · {{ r.project.code }} · {% if s %}{{ s.total }}/100 {{ s.label }}{% if s.missing %} — {{ s.missing|join:"; " }}{% endif %}{% else %}chỉ chấm công/ảnh{% endif %}</li>{% endwith %}{% endfor %}
 </ul></details>{% endif %}{% endfor %}
 {% if topics %}<p><b>Chỗ vướng bot tự ghi tuần này theo loại:</b> {% for label, n in topics %}{{ label }} {{ n }}{% if not forloop.last %}; {% endif %}{% endfor %}</p>{% endif %}{% endif %}
 {% if user.is_director %}<h2>Câu hỏi nhân viên gửi Giám đốc qua trợ lý</h2>

@@ -67,6 +67,7 @@ class Migration(migrations.Migration):
                 choices=[
                     ("anh", "Hỏi ảnh của chi tiết nào"),
                     ("ten_tho", "Hỏi tên thợ là ai"),
+                    ("to", "Hỏi tổ thợ (tổ mới, tên gần giống)"),
                     ("thieu_tho", "Báo cáo chưa có tên thợ"),
                     ("ly_do", "Hỏi lý do (báo giảm, sửa công)"),
                     ("chua_doc", "Phần tin bot chưa đọc được"),

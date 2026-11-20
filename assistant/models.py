@@ -53,6 +53,7 @@ class Feedback(models.Model):
     class Topic(models.TextChoices):
         PHOTO = "anh", "Hỏi ảnh của chi tiết nào"
         PERSON = "ten_tho", "Hỏi tên thợ là ai"
+        TEAM = "to", "Hỏi tổ thợ (tổ mới, tên gần giống)"
         NO_STAFF = "thieu_tho", "Báo cáo chưa có tên thợ"
         REASON = "ly_do", "Hỏi lý do (báo giảm, sửa công)"
         UNREAD = "chua_doc", "Phần tin bot chưa đọc được"

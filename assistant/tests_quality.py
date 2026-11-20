@@ -50,7 +50,7 @@ class ParseTests(BotCase):
             self.assertEqual(data["plan"]["date"], today.isoformat())
             self.assertEqual([(l["floor"], l["description"]) for l in data["plan"]["lines"]],
                              [("Tầng 5", "Đánh lạnh phòng ngoài tầng 5"), ("Tầng 4", "Trát tường tầng 4")])
-            self.assertEqual(data["crew"], "thợ xây: 3 thợ 2 phụ")
+            self.assertEqual(data["crews"], [{"team": "thợ xây", "skilled": 3, "helpers": 2, "others": 0, "owner": False, "work": ""}])
             self.assertEqual(data["people"], [])                                       # "3 thợ 2 phụ" không phải tên
             self.assertEqual(data["work_date"], yesterday.isoformat())
 
@@ -68,33 +68,50 @@ class ParseTests(BotCase):
         self.assertEqual([p["name"] for p in data["people"]], ["Hùng", "Nam"])         # chấm công sau phần dự kiến
         self.assertIsNone(parse.report("TN-22 hôm nay mưa to nghỉ", projects))           # chuyện thường không thành báo cáo
         self.assertEqual(parse.report("TN-22 T1.2 40%; Thắng, Thuận", projects)["unread"], "Thắng, Thuận")
-        self.assertEqual(parse.report("Nhân công: 3 thợ 2 phụ. TN-22 T1.2 40%", projects)["crew"], "3 thợ 2 phụ")
+        self.assertEqual(parse.report("Nhân công: 3 thợ 2 phụ. TN-22 T1.2 40%", projects)["crews"][0]["team"], "")   # không rõ tổ
+        data = parse.report("Báo cáo TN-22\nNhân sự: tổ xây Hùng: 3 thợ 2 phụ; tổ điện (chủ nhà) 2 người đi dây tầng 3\n"
+                            "+ Cắt đục sàn mái\nCông: Lan, Tâm", projects)
+        self.assertEqual([(c["team"], c["skilled"], c["helpers"], c["others"], c["owner"], c["work"]) for c in data["crews"]],
+                         [("tổ xây Hùng", 3, 2, 0, False, ""), ("tổ điện", 0, 0, 2, True, "đi dây tầng 3")])
+        self.assertEqual([p["name"] for p in data["people"]], ["Lan", "Tâm"])                 # thợ công nhật vẫn có tên
 
 
 class FreeReportTests(BotCase):
-    def send_example(self, user=None):
+    def send_example(self, user=None, team="k"):
         today = timezone.localdate()
         yesterday = today - timedelta(days=1)
         self.message(user or self.site, EXAMPLE.format(day=f"{yesterday:%d/%m}", plan=f"{today:%d/%m}"))
-        return self.proposal()
+        proposal = self.proposal()
+        if team:
+            self.press(user or self.site, f"tm:{str(proposal.pk)[:8]}:0:{team}")          # "thợ xây" mới: tổ khoán của ta
+        return proposal
 
     def test_free_report_keeps_extra_work_plan_and_crew_scores_low(self):
-        proposal = self.send_example()
+        proposal = self.send_example(team=None)
+        self.assertIn('• tổ "thợ xây" ?: 5 người (3 thợ, 2 phụ) — bấm chọn ở tin bot hỏi', bot.summary(proposal))
+        self.assertIn("Còn thiếu: xác định tổ", bot.summary(proposal))
+        self.assertIn("＋ Tổ khoán của ta", self.last_buttons(self.chats[self.site.pk]))
+        self.press(self.site, f"tm:{str(proposal.pk)[:8]}:0:k")
+        proposal.refresh_from_db()
         summary = bot.summary(proposal)
         self.assertIn("Việc ngoài bản vẽ (ghi lại, không tính % tiến độ):", summary)
         self.assertIn("• Cắt đục sàn bê tông sàn mái", summary)
         self.assertIn("• Tầng 5 · Đánh lạnh tường phòng trong t5", summary)
         self.assertIn(f"Kế hoạch {timezone.localdate():%d/%m} (dự kiến, chưa phải việc đã làm):", summary)
-        self.assertIn("Nhân sự theo tin: thợ xây: 3 thợ 2 phụ", summary)
+        self.assertIn("• tổ thợ xây (khoán của ta, tổ mới): 5 người (3 thợ, 2 phụ)", summary)
         self.assertIn("Lần sau nhắn theo mẫu này", summary)
         self.assertIn("\n+ Cắt đục sàn bê tông sàn mái\n", bot.standard_text(proposal))
-        self.assertTrue(any("chưa có tên thợ" in t for t in self.texts(self.chats[self.site.pk])))     # danh sách để bấm
-        self.assertEqual(list(Feedback.objects.values_list("topic", flat=True)), [Feedback.Topic.NO_STAFF])
+        self.assertIn("Nhân sự: tổ thợ xây 3 thợ 2 phụ", bot.standard_text(proposal))
+        self.assertFalse(any("chưa có tên thợ" in t for t in self.texts(self.chats[self.site.pk])))    # tổ khoán: không đòi tên
+        self.assertEqual(list(Feedback.objects.values_list("topic", flat=True)), [Feedback.Topic.TEAM])
         with self.captureOnCommitCallbacks(execute=True):
             self.press(self.site, f"ok:{proposal.pk}")
         report = Report.objects.get()
-        self.assertEqual((report.work_date, report.via, report.asked, report.named, report.crew),
-                         (timezone.localdate() - timedelta(days=1), "tu_do", 1, 0, "thợ xây: 3 thợ 2 phụ"))
+        self.assertEqual((report.work_date, report.via, report.asked, report.named),
+                         (timezone.localdate() - timedelta(days=1), "tu_do", 0, 0))        # hỏi tổ mới lần đầu: không trừ điểm
+        crew = report.crews.get()
+        self.assertEqual((crew.team.name, crew.team.kind, crew.skilled, crew.helpers), ("thợ xây", "khoan", 3, 2))
+        self.assertTrue(AuditLog.objects.filter(table="field.Team", action="create").exists())
         self.assertEqual(ExtraWork.objects.filter(report=report).count(), 4)
         self.assertEqual(list(PlanLine.objects.values_list("for_date", "floor")),
                          [(timezone.localdate(), "Tầng 5"), (timezone.localdate(), "Tầng 4")])
@@ -103,29 +120,32 @@ class FreeReportTests(BotCase):
         self.assertFalse(ReportLine.objects.exists())
         self.assertTrue(all(not r.history for r in compute.rows(self.project)))           # không tính vào % tiến độ
         score = quality.of(report)
-        self.assertEqual((score.total, score.label), (5, "▼ cần hướng dẫn"))
+        self.assertEqual((score.total, score.label), (30, "▼ cần hướng dẫn"))          # tổ + số người: đủ 20 điểm nhân sự
         reply = self.texts(self.chats[self.site.pk], "editMessageText")[-1]
-        self.assertIn("Mức đầy đủ báo cáo: 5/100 ▼ cần hướng dẫn", reply)
+        self.assertIn("Mức đầy đủ báo cáo: 30/100 ▼ cần hướng dẫn", reply)
         self.assertIn("thiếu mã chi tiết (0/4 việc có mã)", reply)
         news = self.texts(self.chats[self.director.pk])[-1]
         self.assertIn("Việc ngoài bản vẽ: Trát thô tường phòng ngoài tầng 5", news)
         self.assertIn(f"Kế hoạch {timezone.localdate():%d/%m}: Đánh lạnh phòng ngoài tầng 5; Trát tường tầng 4", news)
-        self.assertIn("Mức đầy đủ: 5/100", news)
+        self.assertIn("Mức đầy đủ: 30/100", news)
+        self.assertIn("Số người theo tổ: tổ thợ xây (khoán của ta, tổ mới): 5 người (3 thợ, 2 phụ)", news)
 
     def test_next_day_report_compared_with_plan_and_evening_lists_not_done(self):
         proposal = self.send_example()
         self.press(self.site, f"ok:{proposal.pk}")
-        self.message(self.site, "Báo cáo TN-22\n+ Đánh lạnh tường phòng ngoài tầng 5\nCông: Nam")
+        self.message(self.site, "Báo cáo TN-22\n+ Đánh lạnh tường phòng ngoài tầng 5\nthợ xây 4 thợ\nCông: Nam")
         proposal = self.proposal()
         summary = bot.summary(proposal)
         day = f"{timezone.localdate():%d/%m}"
         self.assertIn(f"So với kế hoạch đã báo cho {day}: 1/2 việc thấy đã làm.", summary)
         self.assertIn("✓ Đánh lạnh phòng ngoài tầng 5", summary)
         self.assertIn("● chưa thấy trong báo cáo: Trát tường tầng 4", summary)
+        self.assertIn("• tổ thợ xây (khoán của ta): 4 người", summary)                     # tổ đã có: không hỏi lại
         self.press(self.site, f"ok:{proposal.pk}")
         evening = schedule.evening_text(self.director, at(timezone.localdate(), 18, 30))
         self.assertIn("● Dự kiến hôm nay mà chưa thấy làm (1/2): Trát tường tầng 4", evening)
         self.assertIn("1 việc ngoài bản vẽ", evening)
+        self.assertIn("tổ khoán 4 người", evening)
 
     def test_full_report_scores_100_and_clarifications_are_counted(self):
         self.message(self.site, "T1.2", photo="p1")
@@ -172,7 +192,8 @@ class FreeReportTests(BotCase):
         tomorrow = timezone.localdate() + timedelta(days=1)
         result = {"type": "final", "tool": "propose_report", "input": {
             "project_code": "TN-22", "lines": [{"code": "T1.2", "percent": 20}], "people": [], "note": "",
-            "extra": [{"floor": "Mái", "description": "Cắt đục sàn mái"}], "crew": "3 thợ 2 phụ",
+            "extra": [{"floor": "Mái", "description": "Cắt đục sàn mái"}],
+            "crews": [{"team": "điện", "others": 2, "owner": True, "work": "đi dây tầng 3"}],
             "plan": {"date": tomorrow.isoformat(), "lines": [{"code": "S1.1", "description": "Lát nền phòng khách"}]}}}
         with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "run", return_value=result):
             self.message(self.site, "trát tường tầng 1 được 20%, cắt đục sàn mái, mai lát nền, 3 thợ 2 phụ")
@@ -181,7 +202,8 @@ class FreeReportTests(BotCase):
         self.assertEqual(proposal.payload["plan"]["lines"][0]["item_id"], Item.objects.get(code="S1.1").pk)
         self.press(self.site, f"ok:{proposal.pk}")
         report = Report.objects.get()
-        self.assertEqual((report.via, report.crew), ("ai", "3 thợ 2 phụ"))
+        crew = report.crews.get()
+        self.assertEqual((report.via, crew.team.name, crew.team.kind, crew.others, crew.work), ("ai", "điện", "chu_nha", 2, "đi dây tầng 3"))
         self.assertEqual(PlanLine.objects.get().item.code, "S1.1")
         self.assertEqual(PlanLine.objects.get().for_date, tomorrow)
 
@@ -227,18 +249,21 @@ class WeeklyStatsTests(BotCase):
         self.press(self.site, f"ok:{self.proposal().pk}")                               # 100 điểm
         today = timezone.localdate()
         self.message(self.site, EXAMPLE.format(day=f"{today:%d/%m}", plan=f"{today + timedelta(days=1):%d/%m}"))
-        self.press(self.site, f"ok:{self.proposal().pk}")                               # 5 điểm
+        proposal = self.proposal()
+        self.press(self.site, f"tm:{str(proposal.pk)[:8]}:0:x")                        # để "không rõ tổ": nhân sự 10 điểm
+        self.press(self.site, f"ok:{proposal.pk}")                                      # 0+0+0+10+10 = 20 điểm
         self.monday = today + timedelta(days=7 - today.weekday())
 
     def test_monday_bulletin_lists_each_supervisor(self):
         text = schedule.morning_text(self.director, at(self.monday, 7, 30))
         start, end = stats.week_of(timezone.localdate())
         self.assertIn(f"⑤ Báo cáo của giám sát tuần trước ({start:%d/%m}–{end:%d/%m})", text)
-        self.assertIn("• Minh: 2 báo cáo · TB 53/100 ▼ cần hướng dẫn", text)
+        self.assertIn("• Minh: 2 báo cáo · TB 60/100 ● được", text)
         self.assertIn("thiếu mã chi tiết 1/2", text)
         self.assertIn("4 việc ngoài bản vẽ", text)
-        self.assertIn("Cần hướng dẫn cách báo cáo: Minh", text)
-        self.assertIn("Chỗ vướng tuần trước theo loại: Báo cáo chưa có tên thợ 1", text)
+        self.assertNotIn("Cần hướng dẫn cách báo cáo", text)                            # TB 60: chưa tới mức cần hướng dẫn
+        self.assertIn("Chỗ vướng tuần trước theo loại:", text)
+        self.assertIn("Hỏi tổ thợ (tổ mới, tên gần giống) 1", text)
         tuesday = schedule.morning_text(self.director, at(self.monday + timedelta(days=1), 7, 30))
         self.assertNotIn("⑤", tuesday)
 
@@ -246,9 +271,10 @@ class WeeklyStatsTests(BotCase):
         self.client.force_login(self.director)
         page = self.client.get(reverse("assistant"))
         self.assertContains(page, "Mức đầy đủ báo cáo của giám sát")
-        self.assertContains(page, "53/100 ▼ cần hướng dẫn")
+        self.assertContains(page, "60/100 ● được")
+        self.assertContains(page, "20/100 ▼ cần hướng dẫn")
         self.assertContains(page, "Từng báo cáo của Minh (2)")
-        self.assertContains(page, "Báo cáo chưa có tên thợ 1")
+        self.assertContains(page, "Hỏi tổ thợ (tổ mới, tên gần giống) 1")
         self.client.force_login(self.site)
         page = self.client.get(reverse("assistant"))
         self.assertContains(page, "Mức đầy đủ báo cáo của anh/chị")
@@ -272,7 +298,8 @@ class WeeklyStatsTests(BotCase):
         log = book["Báo cáo ngày"]
         head = [c.value for c in log[4]]
         self.assertIn("Mức đầy đủ", head)
-        self.assertIn("5/100 ▼ cần hướng dẫn", str([c.value for c in log[6]]))
+        self.assertIn("20/100 ▼ cần hướng dẫn", str([c.value for c in log[6]]))
+        self.assertIn("chưa rõ tổ 5 người", str([c.value for c in log[6]]))
         site_book = load_workbook(BytesIO(exports.month_book(self.site, self.project, first)))
         self.assertNotIn("Mức đầy đủ", [c.value for c in site_book["Báo cáo ngày"][4]])
 
@@ -295,3 +322,74 @@ class GroupFreeReportTests(BotCase):
         proposal = self.proposal()
         self.assertEqual((proposal.project, proposal.link.user), (self.project, self.site))     # công trình của nhóm
         self.assertEqual(proposal.payload["extra"][0]["floor"], "Mái")
+
+
+class TeamAndTimesheetTests(BotCase):
+    """Chủ dự án 20/11/2026: tổ khoán chỉ cần số người theo tổ, tổ của chủ nhà ghi để phối hợp, thợ công nhật phải có tên;
+    bảng công chia khối văn phòng / khối công nhân / tổ của chủ nhà."""
+
+    def test_owner_team_no_question_contract_team_once_and_score(self):
+        from field.models import Crew, Team
+        self.message(self.site, "TN-22 T1.2 40%\nNhân sự: tổ điện (chủ nhà) 2 người đi dây tầng 3; tổ xây 3 thợ 2 phụ\nCông: Nam")
+        proposal = self.proposal()
+        rows = {c["name"]: c["status"] for c in proposal.payload["crews"]}
+        self.assertEqual(rows, {"điện": "new_ok", "xây": "new"})                     # "chủ nhà" ghi rõ: không hỏi
+        self.press(self.site, f"tm:{str(proposal.pk)[:8]}:1:k")
+        self.press(self.site, f"ok:{proposal.pk}")
+        teams = {t.name: t.kind for t in Team.objects.all()}
+        self.assertEqual(teams, {"điện": Team.Kind.OWNER, "xây": Team.Kind.CONTRACT})
+        self.assertEqual(Crew.objects.get(team__name="điện").work, "đi dây tầng 3")
+        self.assertEqual(quality.of(Report.objects.get()).staff, 20)
+        self.message(self.site, "TN-22 T1.2 50%. Nhân sự: tổ xây 4 thợ")              # lần sau: khớp tổ, không hỏi
+        proposal = self.proposal()
+        self.assertEqual(proposal.payload["crews"][0]["status"], "ok")
+        self.assertIn("✓ Xác nhận", self.last_buttons(self.chats[self.site.pk]))
+        self.assertFalse(any("chưa có tên thợ" in t for t in self.texts(self.chats[self.site.pk])))
+        self.assertEqual(quality.compute(1, 0, 1, 1, 0, 0, teams=0, unknown=1).staff, 10)   # chỉ "3 thợ 2 phụ"
+        self.assertEqual(quality.compute(1, 0, 1, 1, 0, 0).staff, 0)
+
+    def test_team_kind_edited_on_web_by_director_or_internal_accountant_only(self):
+        from field import services as field_services
+        from field.models import Team
+        from money.models import Party
+        team = field_services.add_team(self.site, self.project, "Tổ điện Bình", channel="web")
+        self.assertEqual((team.name, team.kind), ("điện Bình", Team.Kind.CONTRACT))
+        party = Party.objects.create(name="Tổ điện Bình", type="to")
+        self.client.force_login(self.site)
+        self.assertEqual(self.client.post(reverse("field_workers"), {"action": "team", "id": team.pk, "kind": "chu_nha"}).status_code, 403)
+        self.client.force_login(self.accountant)
+        self.client.post(reverse("field_workers"), {"action": "team", "id": team.pk, "kind": "chu_nha", "party": party.pk, "active": "1"})
+        team.refresh_from_db()
+        self.assertEqual((team.kind, team.party), (Team.Kind.OWNER, party))
+        self.assertTrue(AuditLog.objects.filter(table="field.Team", object_id=str(team.pk), action="update", channel="web").exists())
+        page = self.client.get(reverse("field_workers"))
+        self.assertContains(page, "Tổ thợ theo công trình")
+
+    def test_timesheet_grouped_office_workers_owner_with_search(self):
+        from field.views import timesheet
+        self.message(self.site, "TN-22 T1.2 40%\nNhân sự: tổ điện (chủ nhà) 2 người; thợ xây 3 thợ 2 phụ\nCông: Nam, Nguyễn Văn Hùng")
+        proposal = self.proposal()
+        self.press(self.site, f"tm:{str(proposal.pk)[:8]}:1:k")
+        self.press(self.site, f"ok:{proposal.pk}")
+        first = timezone.localdate().replace(day=1)
+        data = timesheet(self.director, first)
+        sections = {s["key"]: s for s in data["sections"]}
+        self.assertEqual([g["title"] for g in sections["van-phong"]["groups"]], ["Giám sát"])
+        self.assertEqual([r["name"] for r in sections["van-phong"]["groups"][0]["rows"]], ["Minh"])
+        workers = {g["title"]: g for g in sections["cong-nhan"]["groups"]}
+        self.assertEqual(set(workers), {"Thợ công nhật · tổ xây", "Tổ khoán · thợ xây"})
+        self.assertEqual(sorted(r["name"] for r in workers["Thợ công nhật · tổ xây"]["rows"]), ["Nam", "Nguyễn Văn Hùng"])
+        self.assertEqual(workers["Tổ khoán · thợ xây"]["total"], Decimal(5))                  # 5 người theo báo cáo
+        self.assertEqual([g["title"] for g in sections["chu-nha"]["groups"]], ["Tổ của chủ nhà · điện"])
+        self.assertEqual(data["cost"], Decimal(800_000))                                   # chỉ thợ công nhật: 300k + 500k
+        found = timesheet(self.director, first, search="hung")
+        names = [r["name"] for s in found["sections"] for g in s["groups"] for r in g["rows"]]
+        self.assertEqual(names, ["Nguyễn Văn Hùng"])
+        self.client.force_login(self.director)
+        page = self.client.get(reverse("field_attendance"))
+        for text in ("Khối văn phòng", "Khối công nhân", "Tổ của chủ nhà", "Cộng Tổ khoán · thợ xây", "Số người theo báo cáo · TN-22"):
+            self.assertContains(page, text)
+        book = load_workbook(BytesIO(self.client.get(reverse("field_attendance"), {"tai": "xlsx"}).content))
+        column = [c.value for c in book.active["A"]]
+        self.assertLess(column.index("KHỐI VĂN PHÒNG"), column.index("KHỐI CÔNG NHÂN"))
+        self.assertIn("Cộng Thợ công nhật · tổ xây", column)
