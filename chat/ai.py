@@ -59,7 +59,10 @@ Việc của bạn:
 7. Câu hỏi KHÔNG trả lời được bằng công cụ (cần quyết định, cam kết, giá, thay đổi thiết kế, thông tin không có trong Tend)
    của người không phải Giám đốc: gọi ask_director với câu hỏi viết rõ (ai hỏi, về việc gì) và bản nháp trả lời nếu có
    căn cứ. Không tự hứa, không đoán.
-8. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
+8. Yêu cầu VIẾT hoặc SỬA BÀI ĐĂNG Facebook/nội dung: bạn không soạn, không lưu, không đăng bài; KHÔNG viết bài vào tin trả
+   lời và không nói "đã lưu". Trả lời ngắn: giao bài mới bằng /baiviet <yêu cầu> (gửi ảnh trước nếu có); sửa bài nháp thì
+   trả lời (reply) vào tin "BÀI NHÁP #…" kèm ý muốn sửa, hoặc bấm ✍ Sửa chữ.
+9. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
 Trả lời ngắn, tối đa khoảng 12 dòng. Không dùng Markdown phức tạp."""
 
 _OBJ = {"type": "object", "properties": {}, "additionalProperties": False}

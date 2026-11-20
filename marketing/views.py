@@ -2,6 +2,8 @@
 giọng văn. Mọi thao tác đi qua `services` (giao dịch + nhật ký kênh web), quyền kiểm ở máy chủ."""
 from datetime import timedelta
 
+from django.db.models import Count, Q
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -106,12 +108,13 @@ def idea_add(request):
     _marketing(request)
     data = request.POST
     project = Project.objects.filter(pk=data.get("project") or 0).first()
+    channel = Channel.objects.filter(pk=data.get("channel") or 0, active=True).first()      # trống = Trang mặc định
     kind = Idea.Kind.REQUEST if data.get("now") == "1" else Idea.Kind.IDEA
     idea = _say(request, lambda: services.add_idea(request.user, data.get("text", ""), kind, project, channel="web"),
                 "Đã ghi ý tưởng." if kind == Idea.Kind.IDEA else "")
     if idea is not None and kind == Idea.Kind.REQUEST:
         post = writer.draft(timezone.localdate(), project=project, idea=idea, brief=idea.text, origin=Post.Origin.REQUEST,
-                            user=request.user)
+                            user=request.user, channel=channel)
         if post is None:
             messages.error(request, "Kho chưa có ảnh phù hợp để soạn bài. Tải ảnh lên Kho ảnh rồi giao lại.")
             return redirect("marketing")
@@ -200,10 +203,15 @@ def settings_page(request):
             count = _say(request, lambda: services.import_samples(user, get_object_or_404(Channel, pk=data.get("id"))), "")
             if count is not None:
                 messages.success(request, f"Đã lấy {count} bài cũ của Trang làm mẫu giọng văn.")
+        elif action == "brief":
+            _say(request, lambda: services.set_brief(user, get_object_or_404(Channel, pk=data.get("id")), data.get("brief", "")),
+                 "Đã lưu giới thiệu Trang. Bài soạn sau sẽ viết theo giới thiệu này.")
         elif action == "sample":
-            _say(request, lambda: services.add_sample(user, data.get("text", "")), "Đã thêm bài mẫu.")
+            row = Channel.objects.filter(pk=data.get("channel") or 0).first()          # trống = dùng chung mọi Trang
+            _say(request, lambda: services.add_sample(user, data.get("text", ""), channel_row=row), "Đã thêm bài mẫu.")
         elif action == "toggle-sample":
             _say(request, lambda: services.toggle_sample(user, get_object_or_404(StyleSample, pk=data.get("id"))), "Đã lưu.")
         return redirect("marketing_settings")
-    return render(request, "marketing/settings.html", {"channels": Channel.objects.all(),
-                                                        "samples": StyleSample.objects.all()[:60]})
+    channels = Channel.objects.annotate(sample_count=Count("samples", filter=Q(samples__active=True)))
+    return render(request, "marketing/settings.html", {"channels": channels,
+                                                        "samples": StyleSample.objects.select_related("channel")[:60]})

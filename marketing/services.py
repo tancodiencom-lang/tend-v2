@@ -256,6 +256,15 @@ def save_channel(user, channel=None, *, name, page, account="", default=True, ac
 
 
 @transaction.atomic
+def set_brief(user, channel, brief, via="web"):
+    """Giới thiệu Trang (thương hiệu, dịch vụ, xưng hô, kêu gọi, hashtag): Giám đốc và Marketing sửa; trợ lý viết theo đây."""
+    _can(user)
+    row = Channel.objects.select_for_update().get(pk=channel.pk)
+    row.brief = _clean(brief, 2000)
+    return record_save(row, user, "Sửa giới thiệu Trang", channel=via)
+
+
+@transaction.atomic
 def check_channel(user, channel, via="web"):
     from . import facebook
     _director(user)
