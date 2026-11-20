@@ -137,7 +137,7 @@ def build(user, projects, start, end, search=""):
                 row["total"] = sum((c for c in row["cells"] if c), ZERO)
                 row["workdays"] = len(row.pop("dates"))
                 row["presence"] = row["workdays"]
-                row["work"] = "; ".join(row["work"][-5:])
+                row["work"] = "; ".join(row["work"][-3:])
 
     def group(title, members, note="", unit="công", contract_team=False):
         members = sorted(members, key=lambda r: (bool(r.get("crew_of")) is False, r["name"]))
@@ -185,6 +185,8 @@ def build(user, projects, start, end, search=""):
         section["cells"] = _sum_cells([{"cells": g["cells"]} for g in section["groups"]], days)
         section["total"] = sum((g["total"] for g in section["groups"]), ZERO)
         section["count"] = sum(g["people"] for g in section["groups"])
+        section["teams"] = sum(1 for g in section["groups"] if any(r.get("crew_of") for r in g["rows"]))
+        section["unit"] = {OFFICE: "công", WORKERS: "công + người theo tổ", OWNER: "người"}[section["key"]]
     flat = [r for s in sections for g in s["groups"] for r in g["rows"]]
     named = [r for r in flat if not r.get("crew_of")]
     return {"days": list(range(start.day, end.day + 1)), "sections": [s for s in sections if s["groups"] or s["key"] != OWNER],

@@ -16,9 +16,9 @@ Sửa công: nhắn bot <b>/suacong</b> kèm lý do.</p>
 </form>
 {% if search %}<p>Đang lọc theo "<b>{{ search }}</b>" · <a href="?thang={{ first|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}">bỏ lọc</a></p>{% endif %}
 {% if money %}<section class="sum"><div><span>Chi phí công nhật ước tính</span><b>{{ data.cost|vnd }}</b></div>{% if data.missing %}<div><span>Thợ công nhật chưa có đơn giá</span><b class="missing">{{ data.missing|length }}</b><small>{{ data.missing|join:", " }}</small></div>{% endif %}</section>{% endif %}
-<nav class="filters" aria-label="Đi tới khối">{% for s in data.sections %}<a class="btn plain" href="#{{ s.key }}">{{ s.title }} ({{ s.count }}{% if s.key != "van-phong" %} người có tên{% endif %})</a>{% endfor %}</nav>
+<nav class="filters" aria-label="Đi tới khối">{% for s in data.sections %}<a class="btn plain" href="#{{ s.key }}">{{ s.title }} ({% if s.key == "van-phong" %}{{ s.count }} người{% elif s.key == "chu-nha" %}{{ s.teams }} tổ{% else %}{{ s.count }} người có tên{% if s.teams %}, {{ s.teams }} tổ khoán{% endif %}{% endif %})</a>{% endfor %}</nav>
 {% for s in data.sections %}
-<details class="box" id="{{ s.key }}" open><summary><h2 style="display:inline">{{ s.title }}</h2> · tổng {{ s.total|num }}</summary>
+<details class="box" id="{{ s.key }}" open><summary><h2 style="display:inline">{{ s.title }}</h2> · tổng {{ s.total|num }} {{ s.unit }}</summary>
 {% if s.note %}<p class="muted">{{ s.note }}</p>{% endif %}
 {% if not s.groups %}<p class="missing">Không có ai{% if search %} khớp "{{ search }}"{% endif %} trong tháng này.</p>{% else %}
 <div class="scroll"><table class="grid sheet">
