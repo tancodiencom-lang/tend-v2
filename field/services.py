@@ -16,11 +16,12 @@ from core.models import Role
 from drawings.models import Item
 from projects.models import Project, projects_for
 
-from .models import Attendance, Photo, Report, ReportLine, Trade, Worker, WorkerRate
+from .models import Attendance, ExtraWork, Photo, PlanLine, Report, ReportLine, Trade, Worker, WorkerRate
 
 HOURS_PER_DAY = Decimal(8)
 HUNDRED = Decimal(100)
 MAX_DAYS_BACK = 31
+PLAN_DAYS_AHEAD = 31
 
 
 def days_from(days=None, hours=None):
@@ -185,10 +186,26 @@ def set_worker(user, worker, *, day_rate=None, pay=None, team=None, kind=None, a
     return worker
 
 
+def _plan_date(value, work_date):
+    day = value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+    if day <= work_date:
+        raise ValidationError(f"Ngày dự kiến {day:%d/%m/%Y} phải sau ngày báo cáo {work_date:%d/%m/%Y}.")
+    if (day - work_date).days > PLAN_DAYS_AHEAD:
+        raise ValidationError(f"Kế hoạch chỉ ghi trong {PLAN_DAYS_AHEAD} ngày tới.")
+    return day
+
+
+def _text(value, size):
+    return " ".join(str(value or "").split())[:size]
+
+
 @transaction.atomic
 def submit_report(user, project, payload, photos=(), client_key=None, channel="telegram"):
     """payload: {work_date, note, lines: [{item_id, percent | quantity, note, reason}],
-    attendance: [{worker_id | new: {name, team, kind}, days, reason}]}; photos: [(File, item_id | None)].
+    extra: [{floor, description, percent?}] (việc ngoài bản vẽ, không tính % tiến độ),
+    plan: {date, lines: [{item_id?, floor, description}]} (việc dự kiến, thường ngày mai),
+    attendance: [{worker_id | new: {name, team, kind}, days, reason}], via, asked, named, crew (dữ kiện chấm mức đầy đủ)};
+    photos: [(File, item_id | None)].
 
     Gửi lại cùng `client_key` trả báo cáo đã ghi, không ghi lần hai. Trả Report.
     """
@@ -201,11 +218,20 @@ def submit_report(user, project, payload, photos=(), client_key=None, channel="t
     work_date = _work_date(payload.get("work_date"))
     lines = payload.get("lines") or []
     attendance = payload.get("attendance") or []
-    if not lines and not attendance and not payload.get("note") and not photos:
+    extra = [e for e in payload.get("extra") or [] if _text(e.get("description"), 500)]
+    plan = payload.get("plan") or {}
+    plan_lines = [p for p in plan.get("lines") or [] if _text(p.get("description"), 500)]
+    if not lines and not attendance and not extra and not plan_lines and not payload.get("note") and not photos:
         raise ValidationError("Báo cáo trống.")
-    items = {i.pk: i for i in Item.objects.filter(project=project, active=True, pk__in=[l.get("item_id") for l in lines])}
+    plan_day = _plan_date(plan.get("date"), work_date) if plan_lines else None
+    wanted = [l.get("item_id") for l in lines] + [p.get("item_id") for p in plan_lines if p.get("item_id")]
+    items = {i.pk: i for i in Item.objects.filter(project=project, active=True, pk__in=wanted)}
+    via = payload.get("via") if payload.get("via") in Report.Via.values else ""
+    named = payload.get("named")
     report = record_save(Report(project=project, author=user, work_date=work_date, note=str(payload.get("note") or "")[:5000],
-                                channel=channel, client_key=client_key), user, "Gửi báo cáo ngày", channel=channel)
+                                channel=channel, client_key=client_key, via=via, asked=min(int(payload.get("asked") or 0), 999),
+                                named=None if named is None else min(int(named), 999), crew=_text(payload.get("crew"), 200)),
+                         user, "Gửi báo cáo ngày", channel=channel)
     by_item = {}
     for line in lines:
         item = items.get(line.get("item_id"))
@@ -226,6 +252,18 @@ def submit_report(user, project, payload, photos=(), client_key=None, channel="t
                                      note=str(line.get("note") or "")[:2000], decrease_reason=reason), user, "Dòng báo cáo",
                           channel=channel)
         by_item[item.pk] = row
+    for entry in extra:
+        percent = entry.get("percent")
+        percent = Decimal(str(percent)) if percent not in (None, "") else None
+        if percent is not None and not 0 <= percent <= 100:
+            raise ValidationError("Phần trăm của việc ngoài bản vẽ phải từ 0 đến 100.")
+        record_save(ExtraWork(report=report, floor=_text(entry.get("floor"), 60), description=_text(entry.get("description"), 500),
+                              percent=percent), user, "Việc ngoài bản vẽ", channel=channel)
+    for entry in plan_lines:
+        item = items.get(entry.get("item_id")) if entry.get("item_id") else None
+        record_save(PlanLine(report=report, for_date=plan_day, item=item, floor=_text(entry.get("floor"), 60),
+                             description=_text(entry.get("description"), 500)), user, f"Việc dự kiến {plan_day:%d/%m/%Y}",
+                    channel=channel)
     for file, item_id in photos:
         photo = Photo(report=report, line=by_item.get(item_id))
         photo.image.save(getattr(file, "name", "anh.jpg"), file, save=False)

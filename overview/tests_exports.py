@@ -55,7 +55,7 @@ class ExportTests(Fixture, TestCase):
         first = self.today.replace(day=1)
         response = self.get(self.director, "reports_month_xlsx", cong_trinh="TN-22", thang=f"{first:%Y-%m}")
         workbook = book(response)
-        self.assertEqual(workbook.sheetnames, ["Tóm tắt", "Tiến độ", "Báo cáo ngày", "Chấm công", "Thu chi"])
+        self.assertEqual(workbook.sheetnames, ["Tóm tắt", "Tiến độ", "Báo cáo ngày", "Việc ngoài bản vẽ", "Kế hoạch", "Chấm công", "Thu chi"])
         rows = {r[1]: r for r in values(workbook["Tiến độ"])[4:] if r[1]}
         wall = rows["T2.5"]
         start_pct = 0.0 if (self.today - timedelta(days=5)) >= first else 0.5   # 50% báo ngày −5: trong tháng thì đầu tháng là 0

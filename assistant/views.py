@@ -4,7 +4,7 @@ Thao tác trên việc làm được cả ở đây lẫn trên bot (cùng đư�
 người làm Nhận việc / Báo xong; Giám đốc Nhận kết quả / Trả lại / Huỷ (trả lại, huỷ phải có lý do).
 Giao việc mới vẫn qua bot (/giao hoặc nói với trợ lý) để có phiếu xác nhận.
 """
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -15,14 +15,23 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from . import services
+from . import services, stats
 from .models import Feedback, Question, Task
+
+
+def _week(request):
+    try:
+        day = date.fromisoformat(request.GET.get("tuan", ""))
+    except ValueError:
+        day = timezone.localdate()
+    return stats.week_of(min(day, timezone.localdate()))
 
 
 @login_required
 @require_GET
 def index(request):
     user, now = request.user, timezone.now()
+    start, end = _week(request)
     rows = services.visible(user)
     open_ = list(rows.filter(state__in=services.OPEN_STATES))
     closed = list(rows.exclude(state__in=services.OPEN_STATES).filter(created_at__gte=now - timedelta(days=30)).order_by("-closed_at"))
@@ -31,8 +40,12 @@ def index(request):
                   "mine": t.owner_id == user.pk} for t in open_],
         "closed": [{"task": t, "line": services.task_line(t, now)} for t in closed],
         "late_count": sum(1 for t in open_ if t.state == Task.State.OPEN and now > t.due),
-        "feedback": list(Feedback.objects.select_related("author")[:50]) if user.is_director else [],
+        "feedback": list(Feedback.objects.select_related("author", "project")[:50]) if user.is_director else [],
         "questions": list(Question.objects.select_related("asked_by", "answered_by")[:30]) if user.is_director else [],
+        "week": {"start": start, "end": end, "prev": start - timedelta(days=7),
+                 "next": start + timedelta(days=7) if start + timedelta(days=7) <= timezone.localdate() else None},
+        "quality": [dict(row, advice=stats.advice(row)) for row in stats.supervisor_rows(user, start, end, now)],
+        "topics": stats.friction_topics(start, end) if user.is_director else [],
     }
     return render(request, "assistant/index.html", context)
 

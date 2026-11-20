@@ -13,11 +13,13 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 
+from assistant.models import Feedback
 from core.audit import record_save
 from core.text import vnd
 from money import services as money
 from money.models import NEEDS_PROJECT, PARTY_TYPE, Entry, Kind, Party
 from money.parties import match
+from projects.models import Project
 
 from . import reads, telegram
 from .models import ChatLink, Proposal
@@ -138,6 +140,13 @@ def summary(proposal):
     return "\n".join(out)
 
 
+def _friction(proposal, topic, text):
+    from .task_bot import friction
+    project = Project.objects.filter(pk=next((r["project_id"] for r in proposal.payload.get("entries") or [] if r.get("project_id")),
+                                             None)).first()
+    friction(proposal.link.user, text, "bot hỏi lại · phiếu thu chi", topic=topic, project=project)
+
+
 def ask(chat_id, proposal, projects):
     """Hỏi từng chỗ còn thiếu bằng nút: đối tượng, công trình, nghi trùng. Mỗi chỗ hỏi một lần."""
     asked = set(proposal.payload.get("asked") or [])
@@ -153,14 +162,18 @@ def ask(chat_id, proposal, projects):
                     else f"Phiếu {i + 1}: \"{r['party']}\" chưa có trong danh sách đối tượng. Thêm mới là loại gì?")
             telegram.send(chat_id, text, buttons)
             asked.add(f"p{i}")
+            _friction(proposal, Feedback.Topic.PARTY, f"Đối tượng \"{r['party']}\" " + ("gần giống nhiều đối tượng" if r["candidates"]
+                                                                                 else "chưa có trong danh sách"))
         if r["kind"] in NEEDS_PROJECT and not r["project_id"] and f"j{i}" not in asked:
             telegram.send(chat_id, f"Phiếu {i + 1} ({r['kind_label']}) thuộc công trình nào?",
                           [[{"text": p.code, "data": f"mj:{short}:{i}:{p.pk}"}] for p in projects[:12]])
             asked.add(f"j{i}")
+            _friction(proposal, Feedback.Topic.PROJECT, f"Phiếu {r['kind_label'].lower()} {vnd(r['amount'])} không ghi công trình")
         if r.get("duplicate") and not r.get("allow_duplicate") and f"d{i}" not in asked:
             telegram.send(chat_id, f"Phiếu {i + 1} nghi trùng: {r['duplicate']}.",
                           [[{"text": "Vẫn ghi, không trùng", "data": f"md:{short}:{i}"}]])
             asked.add(f"d{i}")
+            _friction(proposal, Feedback.Topic.DUPLICATE, f"Phiếu {r['kind_label'].lower()} nghi trùng {r['duplicate']}")
     if asked != set(proposal.payload.get("asked") or []):
         proposal.payload = {**proposal.payload, "asked": sorted(asked)}
         proposal.save(update_fields=["payload"])

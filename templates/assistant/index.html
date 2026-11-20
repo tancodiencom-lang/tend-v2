@@ -26,6 +26,20 @@ Trợ lý nhắc trước hạn, nhắc khi trễ và báo Giám đốc nếu v�
   </td>
 </tr>{% endwith %}{% endfor %}</tbody></table></div>{% else %}<p>Không có việc nào đang mở.</p>{% endif %}
 {% if closed %}<h2>Đã đóng trong 30 ngày</h2><ul>{% for row in closed %}<li>{{ row.line }}</li>{% endfor %}</ul>{% endif %}
+{% if quality %}<h2 id="bao-cao">{% if user.is_director %}Mức đầy đủ báo cáo của giám sát{% else %}Mức đầy đủ báo cáo của anh/chị{% endif %}
+· tuần {{ week.start|date:"d/m" }}–{{ week.end|date:"d/m/Y" }}</h2>
+<p class="muted">Thang 100: mã chi tiết 25, % hoặc khối lượng 25, có ảnh 20, có tên thợ 20, bot không phải hỏi lại 10 (mỗi lần hỏi lại
+trừ 5). Trung bình ≥ 80: ▲ tốt; 60–79: ● được; dưới 60: ▼ cần hướng dẫn. Báo cáo chỉ chấm công/ảnh không chấm điểm.
+<a href="?tuan={{ week.prev|date:'Y-m-d' }}#bao-cao">← Tuần trước</a>{% if week.next %} · <a href="?tuan={{ week.next|date:'Y-m-d' }}#bao-cao">Tuần sau →</a>{% endif %}</p>
+<div class="scroll"><table class="grid"><thead><tr><th>Giám sát</th><th>Báo cáo</th><th>Điểm TB</th><th>Hay thiếu</th><th>Bot hỏi lại</th><th>Việc ngoài bản vẽ</th><th>Phiếu bỏ/hết hạn</th></tr></thead><tbody>
+{% for row in quality %}<tr><td>{{ row.user }}</td><td>{{ row.count }}{% if row.count != row.scored %} ({{ row.scored }} chấm điểm){% endif %}</td>
+<td>{% if row.average is not None %}{{ row.average }}/100 {{ row.label }}{% elif row.count %}chỉ chấm công/ảnh{% else %}● không có báo cáo{% endif %}</td>
+<td>{{ row.advice|default:"—" }}</td><td>{{ row.asked }} lần</td><td>{{ row.extra }}</td><td>{{ row.dropped }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% for row in quality %}{% if row.reports %}<details><summary>Từng báo cáo của {{ row.user }} ({{ row.count }})</summary><ul>
+{% for item in row.reports %}{% with r=item.0 s=item.1 %}<li>{{ r.work_date|date:"d/m" }} · {{ r.project.code }} · {% if s %}{{ s.total }}/100 {{ s.label }}{% if s.missing %} — {{ s.missing|join:"; " }}{% endif %}{% else %}chỉ chấm công/ảnh{% endif %}{% if r.crew %} · nhân sự theo tin: {{ r.crew }}{% endif %}</li>{% endwith %}{% endfor %}
+</ul></details>{% endif %}{% endfor %}
+{% if topics %}<p><b>Chỗ vướng bot tự ghi tuần này theo loại:</b> {% for label, n in topics %}{{ label }} {{ n }}{% if not forloop.last %}; {% endif %}{% endfor %}</p>{% endif %}{% endif %}
 {% if user.is_director %}<h2>Câu hỏi nhân viên gửi Giám đốc qua trợ lý</h2>
 {% if questions %}<div class="scroll"><table class="grid"><thead><tr><th>Số</th><th>Lúc</th><th>Người hỏi</th><th>Ở đâu</th><th>Câu hỏi</th><th>Trạng thái</th></tr></thead><tbody>
 {% for q in questions %}<tr><td>#{{ q.pk }}</td><td>{{ q.created_at|date:"d/m/Y H:i" }}</td><td>{{ q.asked_by }}</td><td>{{ q.where }}</td>
@@ -33,7 +47,8 @@ Trợ lý nhắc trước hạn, nhắc khi trễ và báo Giám đốc nếu v�
 <td>{% if q.state == "open" %}● Chờ anh trả lời (nút trong Telegram){% elif q.state == "answered" %}✓ Đã trả lời{% else %}× Không cần{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>{% else %}<p>Chưa có câu hỏi. Nhân viên nhắn <code>/hoi câu hỏi</code> cho bot hoặc gọi bot trong nhóm.</p>{% endif %}
 <h2>Góp ý và chỗ vướng ({{ feedback|length }} gần nhất)</h2>
+<p class="muted">Số điện thoại trong nội dung đã được che trước khi lưu.</p>
 {% if feedback %}<div class="scroll"><table class="grid"><thead><tr><th>Lúc</th><th>Người</th><th>Loại</th><th>Nội dung</th><th>Ở đâu</th></tr></thead><tbody>
-{% for f in feedback %}<tr><td>{{ f.created_at|date:"d/m/Y H:i" }}</td><td>{{ f.author }}</td><td>{{ f.get_kind_display }}</td><td>{{ f.text }}</td><td>{{ f.context }}</td></tr>{% endfor %}
+{% for f in feedback %}<tr><td>{{ f.created_at|date:"d/m/Y H:i" }}</td><td>{{ f.author }}</td><td>{{ f.get_kind_display }}{% if f.topic %}<br><span class="muted">{{ f.get_topic_display }}</span>{% endif %}</td><td>{{ f.text }}</td><td>{{ f.context }}{% if f.project %} · {{ f.project.code }}{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>{% else %}<p>Chưa có góp ý. Nhân viên nhắn <code>/gopy nội dung</code> cho bot.</p>{% endif %}{% endif %}
 {% endblock %}

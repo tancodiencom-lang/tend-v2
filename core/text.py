@@ -49,3 +49,14 @@ def phone(text):
         digits = "0" + digits[2:]
     return digits
 
+
+
+PHONE_MASK = "[số ĐT đã che]"
+# Số Việt Nam: 0… hoặc +84/84… (di động 10 số, cố định 11 số), có thể cách bằng dấu cách, chấm, gạch: "0912 345 678",
+# "+84.912.345.678", "024-3826-1234". Thà che nhầm một dãy số dài còn hơn để lọt số điện thoại vào góp ý/nhật ký.
+PHONE_IN_TEXT = re.compile(r"(?<!\d)(?:\+\s?84|84|0)(?:[\s.\-]?\d){8,10}(?![\d])")
+
+
+def mask_phones(text):
+    """Thay mọi số điện thoại trong chữ bằng "[số ĐT đã che]" (trước khi lưu góp ý, chỗ vướng)."""
+    return PHONE_IN_TEXT.sub(PHONE_MASK, str(text or ""))

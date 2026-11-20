@@ -24,11 +24,13 @@ from chat import money_bot, telegram
 from chat.models import ChatLink, Proposal
 from core.models import Role, User
 from core.text import vn_number, vnd
-from field.models import Attendance, Report, ReportLine, Worker
+from field import plans
+from field.models import Attendance, ExtraWork, Report, ReportLine, Worker
 from money.models import Entry, Kind
 from overview import compute
 from projects.models import Project
 
+from . import stats
 from .models import Feedback, Notice, Question, Task
 from .services import task_line
 
@@ -43,9 +45,7 @@ QUESTION_REMIND = timedelta(hours=2)
 
 # ---------- giờ giấc ----------
 
-def work_days():
-    raw = str(getattr(settings, "TEND_WORK_DAYS", "1,2,3,4,5,6"))
-    return {int(x) for x in raw.replace(" ", "").split(",") if x.isdigit()}
+work_days = plans.work_days       # TEND_WORK_DAYS, dùng chung với "dự kiến" không ghi ngày (ngày làm việc kế tiếp)
 
 
 def is_workday(local):
@@ -205,13 +205,30 @@ def morning_text(user, now, found=None):
     if offline.exists():
         out.append("\nChưa kết nối Telegram (trợ lý không nhắn được): " + ", ".join(str(u) for u in offline[:10]))
     if local.isoweekday() == 1:
-        week = Feedback.objects.filter(created_at__gte=now - timedelta(days=7))
-        if week.exists():
-            users = week.filter(kind=Feedback.Kind.USER)
-            out.append(f"\nGóp ý tuần qua: {users.count()} góp ý, {week.count() - users.count()} chỗ vướng bot tự ghi.")
-            out += [f"• {f.author}: {f.text[:150]}" for f in users[:5]]
+        out += weekly_text(user, today, now)
     out.append(f"\nXem việc giao: {settings.APP_URL}/tro-ly/")
     return "\n".join(out)
+
+
+def weekly_text(user, today, now):
+    """Phần thứ Hai của bản tin sáng: mức đầy đủ báo cáo tuần trước của từng giám sát, chỗ vướng theo loại, góp ý."""
+    start, end = stats.week_of(today - timedelta(days=7))
+    out = [f"\n⑤ Báo cáo của giám sát tuần trước ({start:%d/%m}–{end:%d/%m}), mức đầy đủ thang 100 "
+           "(mã 25, %/KL 25, ảnh 20, tên thợ 20, không hỏi lại 10)"]
+    rows = stats.supervisor_rows(user, start, end, now)
+    out += [stats.line(row) for row in rows] or ["• Chưa có giám sát nào."]
+    weak = [str(row["user"]) for row in rows if row["average"] is not None and row["average"] < 60]
+    if weak:
+        out.append("Cần hướng dẫn cách báo cáo: " + ", ".join(weak) + f". Chi tiết từng báo cáo: {settings.APP_URL}/tro-ly/")
+    topics = stats.friction_topics(start, end)
+    week = Feedback.objects.filter(created_at__gte=now - timedelta(days=7))
+    users = week.filter(kind=Feedback.Kind.USER)
+    if topics or users.exists():
+        out.append(f"\nGóp ý tuần qua: {users.count()} góp ý, {week.count() - users.count()} chỗ vướng bot tự ghi.")
+        if topics:
+            out.append("Chỗ vướng tuần trước theo loại: " + "; ".join(f"{label} {n}" for label, n in topics[:8]))
+        out += [f"• {f.author}: {f.text[:150]}" for f in users[:5]]
+    return out
 
 
 def personal_text(user, now, found=None):
@@ -252,8 +269,16 @@ def evening_text(user, now):
         people = sum((a.days for a in Attendance.objects.filter(project=project, work_date=today)), Decimal(0))
         gap = (f", {'▲ nhanh' if p['gap'] >= 0 else '▼ chậm'} {vn_number(abs(p['gap']))}% so kế hoạch" if p.get("gap") is not None else "")
         state = f"{vn_number(p['actual'])}%{gap}" if p.get("actual") is not None else p.get("missing") or "chưa tính được %"
-        report = f"{reports} báo cáo, {vn_number(people)} công" if reports else "● CHƯA CÓ BÁO CÁO"
+        extra = ExtraWork.objects.filter(report__project=project, report__work_date=today).count()
+        report = (f"{reports} báo cáo, {vn_number(people)} công" + (f", {extra} việc ngoài bản vẽ" if extra else "")
+                  if reports else "● CHƯA CÓ BÁO CÁO")
         out.append(f"• {project.code}: {state}; hôm nay {report}")
+        planned = plans.compare(project, today)
+        left = [plans.label(r) for r in planned if not r["done"]]
+        if left:
+            out.append(f"  ● Dự kiến hôm nay mà chưa thấy làm ({len(left)}/{len(planned)}): " + "; ".join(left[:8]))
+        elif planned:
+            out.append(f"  ✓ Đã làm đủ {len(planned)} việc dự kiến hôm nay.")
     if len(out) == 1:
         out.append("• Không có công trình đang thi công.")
     money = money_bot.daily_text(user, today)
