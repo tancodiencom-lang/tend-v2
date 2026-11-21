@@ -141,29 +141,34 @@ class Group(models.Model):
 
 
 class GroupViewer(User):
-    """Quyền đọc khi trả lời TRONG NHÓM: mọi người trong nhóm cùng đọc nên không có phần tiền, và chỉ công trình của nhóm."""
+    """Quyền ĐỌC thu hẹp (chỉ dùng để đọc số, không dùng để ghi):
+    - trả lời TRONG NHÓM: mọi người trong nhóm cùng đọc nên không có phần tiền, chỉ công trình của nhóm;
+    - trả lời ở một BÀN trợ lý (chat/desks.py): chỉ phần tiền của đúng vị trí đó (vd bàn Hiện trường không có tiền, kể cả
+      khi Giám đốc hỏi). `money` = các phần được xem trong ("payables", "receivables", "profit"), vẫn cần quyền gốc của người."""
     only_project_id = None
+    money = ()
 
     class Meta:
         proxy = True
 
     @property
     def sees_payables(self):
-        return False
+        return "payables" in self.money and User.sees_payables.fget(self)
 
     @property
     def sees_receivables(self):
-        return False
+        return "receivables" in self.money and User.sees_receivables.fget(self)
 
     @property
     def sees_profit(self):
-        return False
+        return "profit" in self.money and User.sees_profit.fget(self)
 
     @classmethod
-    def of(cls, user, project=None):
+    def of(cls, user, project=None, money=()):
         viewer = cls()
         viewer.__dict__.update({k: v for k, v in user.__dict__.items() if not k.startswith("_")})
         viewer._state = user._state
         viewer.only_project_id = project.pk if project else None
+        viewer.money = tuple(money)
         return viewer
 

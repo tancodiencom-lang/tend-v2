@@ -214,9 +214,12 @@ def month_text(user, month=None):
 
 def entries_for(user, start, end, code=None, party=None):
     from money import services as money
-    from money.models import Entry
+    from money.models import Entry, Kind
     allowed = projects_for(user)
-    rows = (Entry.objects.filter(kind__in=money.visible_kinds(user), date__range=(start, end))
+    kinds = set(money.visible_kinds(user))
+    if not user.sees_receivables:                       # bàn Kế toán nội bộ: Giám đốc hỏi cũng không thấy tiền khách
+        kinds.discard(Kind.CUSTOMER_RECEIPT)
+    rows = (Entry.objects.filter(kind__in=kinds, date__range=(start, end))
             .filter(models_q_project(allowed)).select_related("project", "party_ref").order_by("date", "pk"))
     if code:
         rows = rows.filter(project=project(user, code))

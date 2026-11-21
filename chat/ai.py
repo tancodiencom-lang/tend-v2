@@ -10,6 +10,7 @@
 """
 import json
 import logging
+import time
 from decimal import Decimal
 
 from django.conf import settings
@@ -21,6 +22,9 @@ from .models import AiUsage
 
 log = logging.getLogger(__name__)
 MAX_STEPS = 5
+# Tổng thời gian một lượt AI trả lời tin nhắn bot (giây). Máy chủ web (gunicorn --timeout 90) ngắt yêu cầu quá 90 giây và
+# khi đó bot im lặng (21/11/2026: báo cáo dài ở bàn Hiện trường không được trả lời). Hết giờ → bot đọc tin không cần AI.
+CHAT_BUDGET = 60
 # Giá niêm yết USD / 1 triệu token (vào, ra). Mô hình lạ tính theo giá cao để không vượt trần.
 PRICES = {'claude-haiku-5-5': (Decimal('0.10'), Decimal('0.50')), 'claude-sonnet-5-5': (Decimal(2), Decimal(10)),
           'claude-opus-5-5': (Decimal(4), Decimal(20))}
@@ -236,10 +240,10 @@ def _record(usage, purpose=CHAT, model_name=None):
                                                  calls=F('calls') + 1, cost_usd=F('cost_usd') + cost)
 
 
-def create_message(timeout=40.0, **kwargs):
+def create_message(timeout=40.0, retries=1, **kwargs):
     """Một lần gọi Claude. Bài kiểm thay hàm này bằng bản giả. Bài đăng (chạy nền) chờ lâu hơn tin nhắn bot."""
     import anthropic
-    client = anthropic.Anthropic(timeout=timeout, max_retries=1)
+    client = anthropic.Anthropic(timeout=timeout, max_retries=retries)
     return client.messages.create(**kwargs)
 
 
@@ -279,9 +283,15 @@ def run(text, history, context, execute, images=(), tools=None):
     blocks = image_blocks(images) if images else []
     content = [*blocks, {'type': 'text', 'text': prompt}] if blocks else prompt
     messages = [*history, {'role': 'user', 'content': content}]
+    deadline = time.monotonic() + CHAT_BUDGET
     for _ in range(MAX_STEPS):
+        left = deadline - time.monotonic()
+        if left < 8:                 # không kịp thêm một bước: để bot đọc tin không cần AI, không để máy chủ ngắt giữa chừng
+            log.warning('AI quá %s giây, chuyển sang đọc tin không cần AI', CHAT_BUDGET)
+            return None
         try:
-            response = create_message(model=model(), max_tokens=2000, system=[{'type': 'text', 'text': SYSTEM,
+            response = create_message(timeout=min(30.0, left), retries=0, model=model(), max_tokens=2000,
+                                      system=[{'type': 'text', 'text': SYSTEM,
                                       'cache_control': {'type': 'ephemeral'}}], tools=tools or TOOLS, messages=messages,
                                       output_config={'effort': 'low'})
         except Exception as error:   # mạng/hết hạn mức/khoá sai: bot báo và dùng lệnh không AI

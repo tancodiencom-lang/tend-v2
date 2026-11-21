@@ -708,3 +708,97 @@ class StandardReportTests(BotCase):
         summary = bot.summary(self.proposal())
         self.assertNotIn("Lần sau nhắn theo mẫu", summary)
         self.assertIn("tin ghi thợ, danh sách là thợ phụ", summary)
+
+
+class DeskMoneyScopeTests(BotCase):
+    """Bàn trợ lý chỉ đọc phần tiền của đúng vị trí đó, kể cả khi Giám đốc hỏi (chủ dự án 21/11/2026: gọi @giamsat hỏi tiến
+    độ mà trợ lý kể cả công nợ, tiền khách, lãi)."""
+
+    def setUp(self):
+        super().setUp()
+        self.project.contract_value = 1_000_000_000
+        self.project.save()
+        from money import services as money
+        from money.models import Party
+        cat = Party.objects.create(name="Cát Hùng Vương", type="ncc")
+        money.add_entries(self.director, [{"kind": "hang_ncc", "project_id": self.project.pk, "party_id": cat.pk, "amount": 4_700_000},
+                                          {"kind": "thu_khach", "project_id": self.project.pk, "party": "Khách TN-22",
+                                           "amount": 310_000_000}], client_key="desk-scope", channel="web")
+        self.sent.clear()
+
+    def ask(self, desk, tool, data):
+        seen = {}
+
+        def fake_run(text, history, context, execute, images=(), tools=None):
+            seen["context"] = context
+            seen["result"] = execute(tool, data)
+            return {"type": "text", "text": "ok"}
+        if desk:
+            self.message(self.director, f"@{desk}")
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "run", side_effect=fake_run):
+            self.message(self.director, "tiến độ các công trình thế nào rồi")
+        return seen
+
+    def test_field_desk_sees_no_money_even_for_director(self):
+        seen = self.ask("giamsat", "project_overview", {"project_code": "TN-22"})
+        self.assertIn("progress", seen["result"])
+        for key in ("payables", "customer", "profit"):
+            self.assertNotIn(key, seen["result"])
+        self.assertNotIn("labor_cost", str(seen["result"]))
+        self.assertIn("KHÔNG nói về: nợ nhà cung cấp / tổ thợ / chi phí, tiền khách, lãi lỗ", seen["context"])
+        listed = self.ask(None, "list_projects", {})["result"]["sees_money"]      # vẫn ở bàn Hiện trường
+        self.assertEqual(listed, {"payables": False, "receivables": False, "profit": False})
+        self.message(self.director, "/tongquan")
+        text = self.texts(self.chats[self.director.pk])[-1]
+        self.assertNotIn("₫", text)
+
+    def test_internal_desk_sees_payables_only_and_troly_sees_all(self):
+        seen = self.ask("ketoannoibo", "project_overview", {"project_code": "TN-22"})
+        self.assertIn("payables", seen["result"])
+        self.assertNotIn("customer", seen["result"])
+        self.assertNotIn("profit", seen["result"])
+        rows = self.ask(None, "list_entries", {"project_code": "TN-22"})["result"]
+        self.assertEqual([r["kind"] for r in rows], ["Hàng NCC đã nhận (phát sinh nợ)"])          # không có phiếu thu tiền khách
+        seen = self.ask("troly", "project_overview", {"project_code": "TN-22"})
+        for key in ("payables", "customer", "profit"):
+            self.assertIn(key, seen["result"])
+        self.message(self.director, "@dong")
+        seen = self.ask(None, "project_overview", {"project_code": "TN-22"})      # không ở bàn nào: như Giám đốc
+        self.assertIn("customer", seen["result"])
+
+
+class SilenceTests(BotCase):
+    """Bot không im lặng (21/11/2026: báo cáo dài ở bàn Hiện trường không có phản hồi)."""
+    REPORT = ("Báo cáo cv21/11\n- Nhân sự: thợ xây: 4 thợ 2 phụ\n- Công việc\n+ Ghép coppha dầm tum thang máy\n"
+              "+ Trát thô tường tầng 4.\n- cv dự kiến 22/11\n+ Đổ bê tông dầm tum.")
+
+    def test_ai_over_budget_falls_back_to_reading_without_ai(self):
+        clock = iter([0, 0, 59, 59, 59])             # bước 1 xong thì đã gần hết 60 giây
+
+        def slow(**kwargs):
+            self.assertEqual(kwargs["retries"], 0)
+            self.assertLessEqual(kwargs["timeout"], 30)
+            return SimpleNamespace(stop_reason="tool_use", usage=None, content=[SimpleNamespace(
+                type="tool_use", id="t1", name="find_details", input={"project_code": "TN-22", "query": "tum"})])
+        self.message(self.director, "@giamsat")
+        self.sent.clear()
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "_record"), \
+                mock.patch.object(ai, "create_message", side_effect=slow), \
+                mock.patch.object(ai.time, "monotonic", side_effect=lambda: next(clock)):
+            self.message(self.director, "TN-22 " + self.REPORT)
+        texts = self.texts(self.chats[self.director.pk])
+        self.assertTrue(any("PHIẾU CHỜ XÁC NHẬN · TN-22" in t for t in texts), texts)   # vẫn lập phiếu, đọc không cần AI
+
+    def test_unexpected_error_tells_sender(self):
+        url = reverse("chat_telegram", args=[telegram.webhook_secret()])
+        body = {"update_id": 7100, "message": {"chat": {"id": 42, "type": "private"}, "from": {"id": 1}, "text": "x"}}
+        with mock.patch.object(bot, "handle_update", side_effect=RuntimeError("hỏng")):
+            ok = self.client.post(url, body, content_type="application/json",
+                                  HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN=telegram.webhook_secret())
+        self.assertEqual(ok.status_code, 200)
+        self.assertIn("Tend gặp lỗi khi xử lý tin này", self.texts(42)[-1])
+        self.sent.clear()
+        group = dict(body, update_id=7101, message=dict(body["message"], chat={"id": -5, "type": "group"}))
+        with mock.patch.object(bot, "handle_update", side_effect=RuntimeError("hỏng")):
+            self.client.post(url, group, content_type="application/json", HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN=telegram.webhook_secret())
+        self.assertEqual(self.sent, [])                               # trong nhóm: không báo lỗi ra cả nhóm
