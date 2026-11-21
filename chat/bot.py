@@ -1023,7 +1023,7 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None, desk
     if command in ("/trogiup", "/help", "/start"):
         return HELP, None
     if command == "/tongquan":
-        return reads.overview_text(user), None
+        return reads.overview_text(desks.viewer(user, desk) if group is None else user), None
     if command == "/congtrinh":
         return "Công trình được giao:\n" + "\n".join(f"• {p.code} · {p.name}" for p in reads.projects(user)), None
     if command == "/cong":
@@ -1121,7 +1121,7 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None, desk
                 photo.image.close()
         context = (f"Hôm nay {timezone.localdate():%d/%m/%Y}. Người dùng: {user} (vai {user.get_role_display()}). "
                    f"Ảnh vừa gửi chưa gắn phiếu: {len(photos)}" + (f" (ảnh số 0–{len(images) - 1} đính kèm)." if images else "."))
-        viewer = user
+        viewer = desks.viewer(user, desk) if group is None else user      # bàn trợ lý: chỉ phần tiền của vị trí đó
         if group is not None:
             viewer = GroupViewer.of(user, group.project)
             context += (f"\nĐANG Ở NHÓM Telegram \"{group.title}\"" + (f" của công trình {group.project.code}" if group.project_id else "")

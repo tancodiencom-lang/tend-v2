@@ -34,7 +34,21 @@ def telegram_webhook(request, secret):
         bot.handle_update(update)
     except Exception:   # lỗi bất ngờ: ghi log, không để Telegram gửi lại mãi; update đã ghi nhận ở trên
         log.exception('Bot Telegram lỗi khi xử lý một tin')
+        _tell_failure(update)
     return JsonResponse({'ok': True})
+
+
+def _tell_failure(update):
+    """Báo người nhắn khi bot gặp lỗi bất ngờ (chỉ chat riêng), để họ không chờ mãi trong im lặng (21/11/2026).
+    Chi tiết lỗi chỉ ở nhật ký máy chủ."""
+    try:
+        message = update.get('message') or (update.get('callback_query') or {}).get('message') or {}
+        chat = message.get('chat') or {}
+        if chat.get('id') and chat.get('type', 'private') == 'private':
+            telegram.send(chat['id'], '⚠ Tend gặp lỗi khi xử lý tin này (đã ghi lại để sửa). Anh/chị gửi lại sau ít phút; '
+                                      'vẫn lỗi thì báo Giám đốc.')
+    except Exception:
+        log.exception('Không báo được lỗi cho người nhắn')
 
 
 @login_required

@@ -33,6 +33,7 @@ class Desk:
     focus: str                    # câu dặn AI: bàn này làm gì
     intro: str                    # tin chào khi gọi
     tools: frozenset = None       # công cụ AI được dùng; None = mọi công cụ
+    money: tuple = None           # phần tiền bàn này được đọc ("payables", "receivables", "profit"); None = như người hỏi
 
     @property
     def label(self):
@@ -48,14 +49,16 @@ DESKS = (
          "• Nhắn chủ đề → trợ lý viết bài (1–3 phút).\n"
          "• Gửi ảnh → thêm vào bài đang làm, chưa có bài thì để dành cho bài sắp viết.\n"
          "• Nhắn ý sửa (bắt đầu bằng \"sửa\", \"thêm\", \"bỏ\", \"đổi\", \"viết lại\"…) → trợ lý sửa bài đang làm.\n"
-         "• /noidung xem bài chờ duyệt."),
+         "• /noidung xem bài chờ duyệt.",
+         money=()),
     Desk("ketoannoibo", "Trợ lý Kế toán nội bộ", "💰", ("ketoannoibo", "ktnb", "ketoan", "thuchi"), (Role.INTERNAL_ACCOUNTANT,),
          "phiếu thu chi, chứng từ, công nợ nhà cung cấp và tổ thợ, chi phí công trình",
          "• Gửi ảnh phiếu, hoá đơn, ảnh chuyển khoản → chứng từ (không thành báo cáo hiện trường).\n"
          "• Nhắn nội dung phiếu, vd \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck\" → phiếu chờ Xác nhận.\n"
          "• Hỏi: \"tuần này chi bao nhiêu?\", \"còn nợ Cát Hùng Vương bao nhiêu?\"\n"
          "• Công nợ tuần: /congnotuan (tự gửi sáng thứ Sáu). Hạn trả: /hantra PC12 15/12, /hanno Cát Hùng Vương 30 ngày.",
-         frozenset(READS | ASK | {"money_summary", "list_entries", "find_parties", "propose_entries", "propose_void"})),
+         frozenset(READS | ASK | {"money_summary", "list_entries", "find_parties", "propose_entries", "propose_void"}),
+         money=("payables",)),
     Desk("ketoantaichinh", "Trợ lý Kế toán tài chính", "🏦", ("ketoantaichinh", "kttc", "taichinh", "congno"),
          (Role.FINANCE_ACCOUNTANT,),
          "tiền khách trả, công nợ khách, lãi lỗ, dòng tiền",
@@ -63,14 +66,16 @@ DESKS = (
          "• Nhắn \"thu khách 200tr TN-22 đợt 3 ck\" → phiếu thu chờ Xác nhận.\n"
          "• Hỏi: \"khách TN-22 còn nợ bao nhiêu?\", \"lãi dự báo TN-22?\"\n"
          "• Công nợ khách + dòng tiền: /congnotuan (tự gửi sáng thứ Tư). Đợt thu: /dotthu TN-22 Đợt 3 300tr hạn 15/12.",
-         frozenset(READS | ASK | {"money_summary", "list_entries", "find_parties", "propose_entries", "propose_void"})),
+         frozenset(READS | ASK | {"money_summary", "list_entries", "find_parties", "propose_entries", "propose_void"}),
+         money=("payables", "receivables", "profit")),
     Desk("giamsat", "Trợ lý Hiện trường", "📋", ("giamsat", "gs", "baocao", "hientruong"), (Role.SUPERVISOR,),
          "báo cáo ngày, ảnh hiện trường, chấm công, tiến độ, tổ thợ",
          "• Gửi ảnh + báo cáo ngày (mã chi tiết, %, việc ngoài bản vẽ, dự kiến ngày mai) → phiếu báo cáo chờ Xác nhận.\n"
          "• Chấm công: \"Công: Hậu thợ; Thắng phụ\" hoặc \"tổ xây: 3 thợ 2 phụ\".\n"
          "• Hỏi: \"TN-22 đang chậm bao nhiêu?\", \"tháng này Hùng bao nhiêu công?\"",
          frozenset(READS | ASK | {"find_details", "find_workers", "attendance_summary", "pending_asks", "propose_report",
-                                  "propose_attendance_fix", "propose_answer"})),
+                                  "propose_attendance_fix", "propose_answer"}),
+         money=()),
     Desk("troly", "Trợ lý Giám đốc", "🧭", ("troly", "giamdoc", "gd"),
          (Role.SUPERVISOR, Role.DESIGNER, Role.INTERNAL_ACCOUNTANT, Role.FINANCE_ACCOUNTANT, Role.MARKETING),
          "hỏi tình hình, số liệu, giao việc, theo dõi việc, hỏi Giám đốc",
@@ -132,6 +137,25 @@ def welcome(desk, user):
             f"Bàn tự đóng sau {idle_hours():g} giờ không nhắn.")
 
 
+def viewer(user, desk):
+    """Người đọc số ở bàn này: phần tiền thu hẹp theo vị trí của bàn (Giám đốc hỏi bàn Hiện trường cũng không thấy tiền)."""
+    if desk is None or desk.money is None:
+        return user
+    from .models import GroupViewer
+    return GroupViewer.of(user, None, money=desk.money)
+
+
+MONEY_WORDS = {"payables": "nợ nhà cung cấp / tổ thợ / chi phí", "receivables": "tiền khách", "profit": "lãi lỗ"}
+
+
 def ai_context(desk):
-    return (f"\nNgười dùng ĐANG LÀM VIỆC VỚI {desk.name.upper()} ({desk.focus}). Chỉ làm việc của trợ lý này; tin thuộc việc "
-            f"khác thì trả lời ngắn và nhắc gọi đúng trợ lý ({', '.join('@' + d.aliases[0] for d in DESKS if d.key != desk.key)}).")
+    out = (f"\nNgười dùng ĐANG LÀM VIỆC VỚI {desk.name.upper()} ({desk.focus}). Chỉ làm việc của trợ lý này; tin thuộc việc "
+           f"khác thì trả lời ngắn và nhắc gọi đúng trợ lý ({', '.join('@' + d.aliases[0] for d in DESKS if d.key != desk.key)}).")
+    if desk.money is not None:
+        hidden = [MONEY_WORDS[k] for k in ("payables", "receivables", "profit") if k not in desk.money]
+        if hidden:
+            where = (["@ketoannoibo"] if "payables" not in desk.money else []) + (
+                ["@ketoantaichinh"] if {"receivables", "profit"} - set(desk.money) else []) + ["@troly"]
+            out += (f" Bàn này KHÔNG nói về: {', '.join(hidden)} (dù người hỏi là Giám đốc); hỏi phần đó thì nhắc gọi "
+                    + ", ".join(where) + ".")
+    return out
