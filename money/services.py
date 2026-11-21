@@ -6,8 +6,10 @@ Chủ dự án chốt 18/11/2026:
 - Phiếu chi không cần duyệt trước (ghi nhận việc đã xảy ra).
 - Huỷ: người nhập tự huỷ phiếu của mình trong ngày (có lý do); phiếu cũ hơn hoặc đã xuất MISA cần Giám đốc duyệt.
   Không xoá phiếu, chỉ đánh dấu huỷ.
+Chủ dự án chốt 21/11/2026 (báo cáo công nợ tuần): hạn trả nhà cung cấp, tổ thợ do kế toán nội bộ (và Giám đốc) nhập; đợt
+thanh toán của khách do kế toán tài chính và Giám đốc nhập; cả hai qua bot và web.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -19,7 +21,7 @@ from core.models import Role
 from core.text import fold
 from projects.models import Project, projects_for
 
-from .models import NEEDS_PROJECT, RECEIPTS, Entry, Kind, Party
+from .models import ACCRUALS, NEEDS_PROJECT, RECEIPTS, Entry, Installment, Kind, Party
 
 RECENT_DAYS = 62          # cũ hơn: vẫn nhập được (nhập bù) nhưng phiếu hiện cảnh báo để kiểm kỳ MISA đã khoá sổ chưa
 MAX_DAYS_BACK = 730       # hơn 2 năm: gần như chắc gõ nhầm năm
@@ -50,6 +52,84 @@ def visible_kinds(user):
 
 def can_manage_parties(user):
     return user.is_active and (user.is_director or user.role in (Role.INTERNAL_ACCOUNTANT, Role.FINANCE_ACCOUNTANT))
+
+
+def can_set_due(user):
+    """Hạn trả nhà cung cấp, tổ thợ: Giám đốc và kế toán nội bộ."""
+    return user.is_active and (user.is_director or user.role == Role.INTERNAL_ACCOUNTANT)
+
+
+def can_plan_receivables(user):
+    """Đợt thanh toán của khách: Giám đốc và kế toán tài chính (kế toán nội bộ không xem tiền khách)."""
+    return user.is_active and (user.is_director or user.role == Role.FINANCE_ACCOUNTANT)
+
+
+def effective_due(entry):
+    """Hạn trả của khoản phát sinh nợ: hạn ghi riêng, không thì ngày phiếu + số ngày được nợ của đối tượng; None = chưa có."""
+    if entry.due_on:
+        return entry.due_on
+    days = entry.party_ref.terms_days if entry.party_ref_id else None
+    return entry.date + timedelta(days=days) if days is not None else None
+
+
+def due_date(value, start):
+    day = value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+    if day < start:
+        raise ValidationError(f"Hạn trả {day:%d/%m/%Y} trước ngày phiếu {start:%d/%m/%Y}.")
+    if (day - start).days > 730:
+        raise ValidationError(f"Hạn trả {day:%d/%m/%Y} quá xa (hơn 2 năm) — kiểm tra lại năm.")
+    return day
+
+
+@transaction.atomic
+def set_due(user, entry, due_on, reason="", channel="web"):
+    """Đặt hoặc đổi hạn trả một khoản nhận hàng NCC / khoán tổ thợ. Đổi hạn đã có phải ghi lý do; nhật ký giữ trước/sau."""
+    if not can_set_due(user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ đặt hạn trả.")
+    entry = Entry.objects.select_for_update().get(pk=entry.pk)
+    if entry.kind not in ACCRUALS:
+        raise ValidationError("Chỉ đặt hạn trả cho khoản nhận hàng nhà cung cấp hoặc giá trị khoán tổ thợ.")
+    if entry.voided_at:
+        raise ValidationError("Phiếu đã huỷ.")
+    if entry.project_id and not projects_for(user).filter(pk=entry.project_id).exists():
+        raise PermissionDenied("Công trình không thuộc phạm vi của anh/chị.")
+    day = due_date(due_on, entry.date)
+    reason = " ".join(str(reason or "").split())[:300]
+    if entry.due_on and entry.due_on != day and not reason:
+        raise ValidationError(f"Khoản này đã có hạn {entry.due_on:%d/%m/%Y}; đổi hạn phải ghi lý do (vd nhà cung cấp đồng ý lùi hạn).")
+    entry.due_on = day
+    return record_save(entry, user, (f"Đổi hạn trả: {reason}" if reason else "Đặt hạn trả"), channel=channel)
+
+
+@transaction.atomic
+def add_installment(user, project, name, amount, due_on, note="", channel="web"):
+    if not can_plan_receivables(user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán tài chính nhập đợt thanh toán của khách.")
+    if not projects_for(user).filter(pk=project.pk).exists():
+        raise PermissionDenied("Công trình không thuộc phạm vi của anh/chị.")
+    name = " ".join(str(name or "").split())[:100]
+    if not name:
+        raise ValidationError("Ghi tên đợt (vd Đợt 3 – xong phần thô).")
+    amount = Decimal(str(amount or 0)).quantize(Decimal(1))
+    if amount <= 0:
+        raise ValidationError("Số tiền đợt phải lớn hơn 0.")
+    day = due_on if isinstance(due_on, date) else date.fromisoformat(str(due_on)[:10])
+    return record_save(Installment(project=project, name=name, amount=amount, due_on=day, note=" ".join(str(note or "").split())[:300],
+                                   created_by=user), user, "Thêm đợt thanh toán của khách", channel=channel)
+
+
+@transaction.atomic
+def cancel_installment(user, installment, reason, channel="web"):
+    if not can_plan_receivables(user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán tài chính huỷ đợt thanh toán của khách.")
+    installment = Installment.objects.select_for_update().get(pk=installment.pk)
+    if installment.cancelled_at:
+        raise ValidationError("Đợt này đã huỷ.")
+    reason = " ".join(str(reason or "").split())[:300]
+    if not reason:
+        raise ValidationError("Huỷ đợt thanh toán phải ghi lý do (vd ký phụ lục đổi tiến độ thanh toán).")
+    installment.cancelled_at, installment.cancel_reason = timezone.now(), reason
+    return record_save(installment, user, f"Huỷ đợt thanh toán: {reason}", channel=channel)
 
 
 def check_date(value):
@@ -151,9 +231,10 @@ def add_entries(user, rows, client_key, channel="telegram"):
         if twin and not row.get("allow_duplicate"):
             raise ValidationError(f"Có thể trùng phiếu đã ghi: {twin} ngày {twin.date:%d/%m/%Y}.")
         method = row.get("method") or (Entry.Method.NONE if kind in (Kind.SUPPLIER_GOODS, Kind.TEAM_WORK) else Entry.Method.CASH)
+        due_on = due_date(row["due_on"], day) if row.get("due_on") and kind in ACCRUALS else None
         entry = Entry(kind=kind, project=project, date=day, number=number, party=label, party_ref=party,
                       content=str(row.get("content") or Kind(kind).label)[:500], amount=amount, method=method,
-                      entered_by=user, client_key=key_)
+                      entered_by=user, client_key=key_, due_on=due_on)
         if row.get("voucher") is not None:
             entry.voucher.save(getattr(row["voucher"], "name", "chung-tu.jpg"), row["voucher"], save=False)
         out.append(record_save(entry, user, "Nhập phiếu qua chat" if channel == "telegram" else "Nhập phiếu", channel=channel))

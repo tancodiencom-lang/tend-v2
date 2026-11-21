@@ -40,7 +40,7 @@ from money import services as money
 
 from marketing import bot as marketing_bot
 
-from . import ai, group_bot, money_bot, parse, reads, task_bot, telegram
+from . import ai, debt_bot, group_bot, money_bot, parse, reads, task_bot, telegram
 from .models import ChatLink, ChatPhoto, ChatUpdate, GroupViewer, LinkCode, Proposal
 
 CODE_TTL = timedelta(minutes=15)
@@ -59,7 +59,7 @@ HELP = ("Tend qua Telegram:\n"
         "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup\n"
         "• Kế toán: chụp ảnh phiếu hoặc nhắn \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng\" (loại: thu khách, thu khác, "
         "nhận hàng, khoán, trả NCC, trả tổ, trả lương, chi). Tra cứu: /thuchi hôm nay|tuần|tháng, /congno [TN-22], /baocao tuần|tháng, "
-        "/doituong <tên>. Huỷ: /huy PC12 lý do.\n" + task_bot.HELP + "\n" + marketing_bot.HELP + "\n"
+        "/doituong <tên>. Huỷ: /huy PC12 lý do.\n" + debt_bot.HELP + "\n" + task_bot.HELP + "\n" + marketing_bot.HELP + "\n"
         "• Gọi trợ lý để làm việc liền một việc (ảnh, tin không bị hiểu sang việc khác): @mkt, @ketoannoibo, @ketoantaichinh, "
         "@giamsat, @troly; @dong để đóng (tự đóng sau 3 giờ không nhắn).")
 
@@ -410,6 +410,8 @@ def summary(proposal):
         return task_bot.summary(proposal)
     if proposal.kind == Proposal.Kind.MONEY:
         return money_bot.summary(proposal)
+    if proposal.kind == Proposal.Kind.DEBT:
+        return debt_bot.summary(proposal)
     if proposal.kind == Proposal.Kind.VOID:
         return money_bot.void_summary(proposal) + "\nBấm Xác nhận để huỷ phiếu này."
     p = proposal.payload
@@ -916,6 +918,8 @@ def decide(link_row, proposal_id, confirm):
                 result = money_bot.confirm(proposal, user)
             elif proposal.kind == Proposal.Kind.TASK:
                 result = task_bot.confirm(proposal, user)
+            elif proposal.kind == Proposal.Kind.DEBT:
+                result = debt_bot.confirm(proposal, user)
             elif proposal.kind == Proposal.Kind.VOID:
                 if p.get("needs_director"):
                     raise PermissionDenied("Phiếu này cần Giám đốc duyệt huỷ.")
@@ -1043,6 +1047,8 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None, desk
         return "Đã ngắt kết nối Telegram với Tend.", None
     if command == "/congno":
         return reads.debts_text(user, text.split()[1] if len(text.split()) > 1 else None), None
+    if command in debt_bot.COMMANDS:
+        return debt_bot.handle(link_row, command, text)
     if command in ("/thuchi", "/baocao"):
         arg = " ".join(text.split()[1:])
         span = parse.period(arg or ("" if command == "/thuchi" else "tuần"))

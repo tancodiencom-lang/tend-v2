@@ -53,14 +53,16 @@ DESKS = (
          "phiếu thu chi, chứng từ, công nợ nhà cung cấp và tổ thợ, chi phí công trình",
          "• Gửi ảnh phiếu, hoá đơn, ảnh chuyển khoản → chứng từ (không thành báo cáo hiện trường).\n"
          "• Nhắn nội dung phiếu, vd \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck\" → phiếu chờ Xác nhận.\n"
-         "• Hỏi: \"tuần này chi bao nhiêu?\", \"còn nợ Cát Hùng Vương bao nhiêu?\"",
+         "• Hỏi: \"tuần này chi bao nhiêu?\", \"còn nợ Cát Hùng Vương bao nhiêu?\"\n"
+         "• Công nợ tuần: /congnotuan (tự gửi sáng thứ Sáu). Hạn trả: /hantra PC12 15/12, /hanno Cát Hùng Vương 30 ngày.",
          frozenset(READS | ASK | {"money_summary", "list_entries", "find_parties", "propose_entries", "propose_void"})),
     Desk("ketoantaichinh", "Trợ lý Kế toán tài chính", "🏦", ("ketoantaichinh", "kttc", "taichinh", "congno"),
          (Role.FINANCE_ACCOUNTANT,),
          "tiền khách trả, công nợ khách, lãi lỗ, dòng tiền",
          "• Gửi ảnh ủy nhiệm chi, phiếu thu của khách → chứng từ.\n"
          "• Nhắn \"thu khách 200tr TN-22 đợt 3 ck\" → phiếu thu chờ Xác nhận.\n"
-         "• Hỏi: \"khách TN-22 còn nợ bao nhiêu?\", \"lãi dự báo TN-22?\"",
+         "• Hỏi: \"khách TN-22 còn nợ bao nhiêu?\", \"lãi dự báo TN-22?\"\n"
+         "• Công nợ khách + dòng tiền: /congnotuan (tự gửi sáng thứ Tư). Đợt thu: /dotthu TN-22 Đợt 3 300tr hạn 15/12.",
          frozenset(READS | ASK | {"money_summary", "list_entries", "find_parties", "propose_entries", "propose_void"})),
     Desk("giamsat", "Trợ lý Hiện trường", "📋", ("giamsat", "gs", "baocao", "hientruong"), (Role.SUPERVISOR,),
          "báo cáo ngày, ảnh hiện trường, chấm công, tiến độ, tổ thợ",

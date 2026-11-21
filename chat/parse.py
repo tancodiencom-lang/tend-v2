@@ -468,6 +468,19 @@ def money(text, projects):
             entry["method"] = "tien_mat"
             i += 1 if low == "tm" else 2
             continue
+        elif low == "han":                                         # "hạn 15/12", "hạn trả 30 ngày"
+            j = i + 1 + (1 if nxt == "tra" else 0)
+            target = tokens[j] if j < len(tokens) else ""
+            after = folded[j + 1] if j + 1 < len(tokens) else ""
+            if DATE.match(target):
+                entry["due_date"] = target                         # dd/mm: tính năm theo ngày phiếu (money_bot.build)
+                i = j + 1
+                continue
+            if target.isdigit() and after == "ngay":
+                entry["due_days"] = int(target)
+                i = j + 2
+                continue
+            party.append(token)
         elif DATE.match(token):
             entry["date"] = day(token).isoformat()
         else:
