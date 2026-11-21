@@ -715,6 +715,26 @@ class DeepWritingTests(MarketingCase):
             jobs._spawn_if_idle()
         self.assertIn("viet_bai", popen.call_args[0][0])
 
+    def test_photo_sent_again_same_telegram_file_is_still_used(self):
+        """Chủ dự án 21/11/2026: gửi lại đúng tấm ảnh (Telegram giữ nguyên mã tệp) 3 lần mà bài vẫn "không có ảnh"."""
+        self.message(self.mkt, "", photo="cung-tep")                                   # lần đầu: ảnh lẻ (rơi vào luồng báo cáo)
+        Post.objects.all().delete()
+        from chat.models import ChatPhoto as Photo_
+        Photo_.objects.filter(file_unique_id="cung-tep").update(received_at=timezone.now() - timedelta(hours=2), target="noi-dung")
+        self.message(self.mkt, "/baiviet dầm tum thang máy", photo="cung-tep")         # gửi lại đúng tệp kèm lệnh
+        post = Post.objects.get()
+        self.assertEqual(post.items.count(), 1)
+        self.assertEqual(Photo_.objects.filter(file_unique_id="cung-tep").count(), 1)  # không lưu trùng ảnh
+        draft = services.create_post(self.mkt, "Bài thử thêm ảnh", [], timezone.localdate())
+        msg = {"message_id": 902, "chat": {"id": int(self.chats[self.mkt.pk]), "type": "private"},
+               "from": {"id": self.mkt.pk + 9000, "first_name": "mkt"},
+               "photo": [{"file_id": "cung-tep", "file_unique_id": "cung-tep", "file_size": 100, "width": 8}],
+               "reply_to_message": {"message_id": 6, "from": {"id": 1, "is_bot": True}, "text": PREFIX_ANCHOR(draft)}}
+        from chat import bot as chat_bot
+        chat_bot.handle_update({"update_id": next(self.update_id), "message": msg})    # trả lời bản nháp bằng ảnh đã gửi
+        draft.refresh_from_db()
+        self.assertEqual(draft.items.count(), 1)
+
     def test_facebook_errors_in_vietnamese(self):
         text = facebook.vietnamese(190, 463, "Error validating access token: Session has expired on Friday, 20-Nov-26 00:00:00 "
                                              "PST. The current time is Saturday, 21-Nov-26 00:28:02 PST.")

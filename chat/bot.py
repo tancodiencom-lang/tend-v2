@@ -1236,8 +1236,12 @@ def _sender(message):
     return str(person.get("id") or ""), name
 
 
+def _best_size(sizes):
+    return max(sizes, key=lambda p: (p.get("file_size") or 0, p.get("width") or 0))
+
+
 def _save_photo(link_row, sizes, caption=""):
-    best = max(sizes, key=lambda p: (p.get("file_size") or 0, p.get("width") or 0))
+    best = _best_size(sizes)
     if link_row.photos.filter(file_unique_id=best.get("file_unique_id", "")).exists():
         return True
     got = telegram.download(best["file_id"])
@@ -1337,11 +1341,16 @@ def handle_message(message):
         if not photo:
             telegram.send(chat_id, "Không nhận được ảnh (quá 15 MB, không phải ảnh, hoặc lỗi mạng). Gửi lại giúp.")
             return
+        # Gửi lại đúng tệp đã gửi trước (Telegram giữ nguyên mã tệp): báo cáo không ghi trùng, nhưng bài đăng vẫn dùng bản
+        # đã lưu (chủ dự án 21/11/2026: gửi lại ảnh 3 lần mà bài vẫn "không có ảnh").
+        link_row.incoming_photo = (photo if photo is not True else link_row.photos.filter(
+            file_unique_id=_best_size(sizes).get("file_unique_id", "")).order_by("-pk").first())
         replied = message.get("reply_to_message") or {}
         draft = (marketing_bot.PREVIEW.search(replied.get("text") or replied.get("caption") or "")
                  if (replied.get("from") or {}).get("is_bot") else None)
-        if draft and photo is not True:                  # trả lời bản nháp bài đăng bằng ảnh = thêm ảnh vào bài đó
-            answer = marketing_bot.reply_photo(link_row, int(draft.group(1)), photo, message.get("media_group_id") or "")
+        if draft and link_row.incoming_photo is not None:   # trả lời bản nháp bài đăng bằng ảnh = thêm ảnh vào bài đó
+            answer = marketing_bot.reply_photo(link_row, int(draft.group(1)), link_row.incoming_photo,
+                                               message.get("media_group_id") or "")
             if answer:
                 telegram.send(chat_id, answer)
             return

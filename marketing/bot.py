@@ -217,8 +217,7 @@ def reply_photo(link_row, post_id, photo, album=""):
                                    context=re.sub(r"^/\S+\s*", "", photo.caption or ""))
     if asset is None:
         return "Ảnh không dùng được (không phải ảnh hoặc quá lớn)."
-    photo.target = "noi-dung"
-    photo.save(update_fields=["target"])
+    _mark_content(photo)
     try:
         post = services.add_asset(link_row.user, post, asset)
     except (PermissionDenied, ValidationError) as error:
@@ -241,11 +240,23 @@ def _project(text):
     return None, text
 
 
+def _mark_content(photo):
+    """Ảnh dùng cho bài đăng: không gắn vào báo cáo nữa (ảnh đã thuộc phiếu báo cáo thì giữ nguyên)."""
+    if photo.proposal_id is None and photo.target != "noi-dung":
+        photo.target = "noi-dung"
+        photo.save(update_fields=["target"])
+
+
 def _sent_photos(link_row):
-    """Ảnh người giao bài vừa gửi (30 phút, chưa gắn phiếu) → kho ảnh; đánh dấu để không gắn vào báo cáo nữa."""
+    """Ảnh người giao bài vừa gửi (30 phút, chưa gắn phiếu) + ảnh kèm chính tin này (kể cả gửi lại ảnh đã gửi trước) → kho."""
     from chat.bot import PHOTO_WINDOW
+    rows = list(link_row.photos.filter(proposal__isnull=True, received_at__gte=timezone.now() - PHOTO_WINDOW)
+                .exclude(target="noi-dung"))
+    current = getattr(link_row, "incoming_photo", None)
+    if current is not None and current not in rows:
+        rows.append(current)
     items = []
-    for photo in link_row.photos.filter(proposal__isnull=True, received_at__gte=timezone.now() - PHOTO_WINDOW).exclude(target="noi-dung"):
+    for photo in rows:
         try:
             with photo.image.open("rb") as handle:
                 data = handle.read()
@@ -253,9 +264,8 @@ def _sent_photos(link_row):
             continue
         asset = asset_files.add_upload(link_row.user, data, photo.image.name.rsplit("/", 1)[-1],
                                        context=re.sub(r"^/\S+\s*", "", photo.caption or ""))
-        photo.target = "noi-dung"
-        photo.save(update_fields=["target"])
-        if asset is not None:
+        _mark_content(photo)
+        if asset is not None and asset not in items:
             items.append(asset)
     return items
 
