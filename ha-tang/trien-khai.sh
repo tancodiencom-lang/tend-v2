@@ -55,7 +55,10 @@ if grep -q '^TEND_META_TOKEN=.' "$ROOT/.env"; then
 else
   echo "Tro ly noi dung: chua co khoa TEND_META_TOKEN trong $ROOT/.env nen bai duyet xong se bao loi 'chua co khoa' (soan nhap van chay)"
 fi
-if rclone listremotes 2>/dev/null | grep -q '^tendcrypt:$'; then
+# Doc het danh sach kho roi moi tim: 'rclone listremotes | grep -q' voi pipefail bao nham "khong thay" tren may 1 nhan
+# (grep thoat som, rclone dang in dong sau bi ngat → pipefail coi la loi). Da tai hien 21/11/2026.
+REMOTES=$(rclone listremotes 2>/dev/null || true)
+if grep -qx 'tendcrypt:' <<<"$REMOTES"; then
   systemctl enable -q --now tend-v2-saoluu.timer tend-v2-khoiphuc.timer
   echo "Da bat sao luu hang dem 02:30 (cung kho Drive voi ban cu, thu muc tend-v2/) va thu khoi phuc ngay 3 hang thang"
 else
@@ -63,7 +66,7 @@ else
 fi
 GOC=$(grep -m1 '^TEND_GOC_DRIVE=' "$ROOT/.env" | cut -d= -f2- || true)
 GOC=${GOC:-gdrive:}
-if [ "$GOC" = tat ] || rclone listremotes 2>/dev/null | grep -qx "${GOC%%:*}:"; then
+if [ "$GOC" = tat ] || grep -qx -- "${GOC%%:*}:" <<<"$REMOTES"; then
   systemctl enable -q --now tend-v2-goc.timer
   echo "Da bat kho tai lieu goc: moi gio xep anh/chung tu theo ngay, chep len Google Drive (thu muc 'Tend - Tài liệu gốc')"
 else

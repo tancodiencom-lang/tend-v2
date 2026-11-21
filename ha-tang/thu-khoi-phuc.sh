@@ -16,7 +16,7 @@ trap cleanup EXIT
 fail() { echo "LOI: $*"; exit 1; }
 count() { sudo -u postgres psql -tAq -d "$1" -c "SELECT count(*) FROM $2"; }
 
-LATEST=$(rclone lsf --dirs-only "${REMOTE}hang-ngay" | sort -r | head -1)
+LATEST=$(rclone lsf --dirs-only "${REMOTE}hang-ngay" | sort -r | sed -n 1p)   # sed doc het (head thoat som + pipefail)
 LATEST=${LATEST%/}
 [ -n "$LATEST" ] || fail "chua co ban sao luu nao tren Drive (${REMOTE}hang-ngay)"
 
