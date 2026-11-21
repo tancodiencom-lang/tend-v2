@@ -180,7 +180,12 @@ def collect():
 
 
 def add_upload(user, data, filename, project=None, context=""):
-    """Ảnh gửi cho trợ lý nội dung (qua bot /baiviet hoặc tải lên web)."""
+    """Ảnh gửi cho trợ lý nội dung (qua bot /baiviet, trả lời bản nháp, tải lên web). Ảnh đã có trong kho (gửi lại đúng ảnh
+    cũ) → trả ảnh có sẵn để vẫn dùng được, không thêm trùng."""
+    if data and len(data) <= MAX_BYTES:
+        existing = Asset.objects.filter(sha256=sha_of(data)).first()
+        if existing is not None:
+            return existing
     return _add(Asset.Source.UPLOAD, data, None, project=project, taken_on=timezone.localdate(), context=context[:500],
                 origin=f"upload:{filename}"[:400], added_by=user)
 

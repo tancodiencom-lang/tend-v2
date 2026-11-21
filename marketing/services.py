@@ -124,6 +124,22 @@ def swap_asset(user, post, index, replacement=None, block=False, reason="", chan
 
 
 @transaction.atomic
+def add_asset(user, post, asset, channel="telegram"):
+    """Thêm ảnh (người duyệt gửi thêm) vào cuối bài; bản mới → phải duyệt lại."""
+    _can(user)
+    post = _locked(post)
+    _editable(post)
+    current = assets_of(post)
+    if asset in current:
+        return post
+    if len(current) >= MAX_PHOTOS:
+        raise ValidationError(f"Bài đã đủ {MAX_PHOTOS} ảnh: bớt ảnh trước khi thêm.")
+    _set_assets(post, current + [asset])
+    post.state = Post.State.DRAFT
+    return _refresh(post, user, f"Thêm ảnh {len(current) + 1}", channel)
+
+
+@transaction.atomic
 def remove_asset(user, post, index, channel="telegram"):
     _can(user)
     post = _locked(post)
@@ -192,6 +208,10 @@ def approve(user, post, seen_sha, channel="telegram"):
         raise ValidationError(f"Bài #{post.pk} {post.get_state_display().lower()}.")
     if not seen_sha or not post.package_sha.startswith(seen_sha):
         raise ValidationError(f"Bài #{post.pk} đã thay đổi sau bản anh/chị đang xem. Xem bản mới nhất rồi duyệt.")
+    from .writer import PLACEHOLDER
+    if PLACEHOLDER in post.text:
+        raise ValidationError(f"Bài #{post.pk} còn CHỮ TẠM (AI chưa viết được): bấm ✍ Sửa chữ hoặc trả lời bản nháp để trợ lý "
+                              "viết lại, rồi mới duyệt.")
     channels = list(post.channels.filter(active=True))
     if not channels:
         raise ValidationError("Chưa chọn Trang để đăng.")

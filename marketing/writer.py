@@ -28,29 +28,49 @@ ENOUGH = 3                 # bài có ít hơn số ảnh đạt chuẩn này: g
 
 # Thương hiệu KHÔNG ghi cố định ở đây: mỗi Trang (Channel) có giới thiệu riêng (`brief`) và bài mẫu riêng — TenD, New Roma…
 # là các thương hiệu khác nhau của cùng công ty (system_prompt).
-RULES = """Quy tắc bắt buộc:
+# Chủ dự án 21/11/2026: bài cũ "nông", AI không khai thác ý người giao → yêu cầu là Ý CHÍNH, được dùng kiến thức chuyên môn
+# chung (không bịa dữ kiện riêng của công trình); bài chuyên môn dài hơn bài cập nhật.
+RULES = """CÁCH VIẾT
+- YÊU CẦU CỦA NGƯỜI GIAO BÀI (nếu có) là Ý CHÍNH của bài: khai thác sâu, KHÔNG chép lại nguyên văn yêu cầu. Dùng kiến thức
+  chuyên môn xây dựng, hoàn thiện nhà đúng thực tế Việt Nam để giải thích: vì sao hạng mục/vấn đề đó quan trọng, sai lầm
+  hay gặp và hậu quả, dấu hiệu chủ nhà tự nhận biết, cách làm đúng và cách kiểm tra, lời khuyên cho chủ nhà. Ảnh (nếu có)
+  minh hoạ cách đơn vị làm ở công trình thật.
+- Chọn dạng bài:
+  • BÀI CHUYÊN MÔN khi người giao nêu một hạng mục, một vấn đề, một câu hỏi hoặc yêu cầu viết chi tiết: 350–600 chữ; câu mở
+    đầu gây chú ý (nêu điều chủ nhà hay gặp hoặc hay bỏ sót); 3–5 ý chính, mỗi ý cụ thể, ngắn gọn (được dùng gạch đầu dòng,
+    biểu tượng tiết chế); liên hệ ảnh công trình; kết bằng lời khuyên và câu kêu gọi của Trang.
+  • BÀI CẬP NHẬT CÔNG TRÌNH khi không có yêu cầu hoặc chỉ khoe ảnh: 100–200 chữ, nói cụ thể việc thấy trong ảnh.
+  Có bài mẫu thì theo GIỌNG VĂN bài mẫu (cách mở bài, biểu tượng cảm xúc, hashtag, câu kêu gọi); độ dài theo dạng bài.
+- Tiếng Việt có dấu, tự nhiên, ấm áp, chuyên nghiệp. Tránh câu sáo rỗng ("tỉ mỉ từng chi tiết", "chất lượng hàng đầu")
+  nếu không kèm điều cụ thể.
+
+SỰ THẬT, RIÊNG TƯ
+- Kiến thức kỹ thuật chung được dùng. KHÔNG bịa dữ kiện riêng của công trình trong ảnh (kích thước, mác bê tông, số thép,
+  vật liệu, diện tích, thời gian) khi ảnh và mô tả không cho biết; không trích số hiệu tiêu chuẩn, quy định nếu không chắc
+  chắn; không hứa giá, bảo hành, tiến độ.
+- KHÔNG nêu tên chủ nhà, địa chỉ, số nhà, tên đường, mã công trình nội bộ, số điện thoại cá nhân, giá tiền.
 - Chỉ viết cho đúng Trang này: đúng thương hiệu, dịch vụ, cách xưng hô, câu kêu gọi, hashtag trong giới thiệu và bài mẫu
   của Trang. Không nhắc tên, phong cách, khẩu hiệu hay hashtag của thương hiệu/Trang khác.
-- Tiếng Việt có dấu, viết theo GIỌNG VĂN của các bài mẫu (độ dài, cách mở bài, biểu tượng cảm xúc, hashtag, câu kêu gọi).
-  Không có bài mẫu thì viết 80–180 chữ, ấm áp, chuyên nghiệp, kết bằng lời mời nhắn tin tư vấn.
-- KHÔNG nêu tên chủ nhà, địa chỉ, số nhà, tên đường, mã công trình nội bộ, số điện thoại cá nhân, giá tiền; không hứa giá
-  hay tiến độ. Chỉ nói điều thấy được trong ảnh và mô tả việc kèm theo; không bịa vật liệu, diện tích, thời gian.
+
+ẢNH (đánh số từ 1 như người duyệt thấy)
 - CHẤM TỪNG ẢNH (scores, mọi ảnh được đưa) từ 1 đến 5 theo bộ tiêu chuẩn cố định:
   ánh sáng đủ, rõ nét (ảnh đã được tự cân sáng/màu nhẹ); bố cục thẳng, thấy rõ hạng mục, không cắt cụt; GỌN GÀNG (không rác,
   bao bì, vữa vương vãi, dụng cụ bừa bộn, dây điện rối, quần áo phơi); thấy rõ thành quả thi công.
   5 = đăng được ngay; 4 = tốt; 3 = tạm được; 2 = không nên đăng; 1 = hỏng. Ảnh có mặt người nhìn rõ, giấy tờ, màn hình,
   biển số nhà, biển số xe: tối đa 1 điểm. "issue": lỗi chính của ảnh (để trống nếu không có).
-- photos: chọn 1–10 ảnh từ 3 điểm trở lên, đúng chủ đề; ảnh đẹp nhất (tổng thể) đứng đầu.
-- "note": một câu cho người duyệt biết vì sao chọn chủ đề/ảnh này và ảnh nào đã bỏ (nếu có)."""
+- photos: chọn 1–10 ảnh từ 3 điểm trở lên, đúng chủ đề; ảnh đẹp nhất (tổng thể) đứng đầu. Không có ảnh: scores và photos
+  là danh sách rỗng.
+- "note": một câu cho người duyệt: dạng bài đã chọn, vì sao chọn các ảnh này, ảnh nào đã bỏ (nếu có)."""
+PLACEHOLDER = "[CHỮ TẠM – CẦN VIẾT LẠI]"        # bài AI chưa viết được: không cho duyệt khi còn dòng này (services.approve)
 
 SCHEMA = {"type": "json_schema", "schema": {
     "type": "object", "additionalProperties": False, "required": ["scores", "photos", "text", "note"],
-    "properties": {"scores": {"type": "array", "description": "Điểm từng ảnh được đưa (1–5) theo bộ tiêu chuẩn",
+    "properties": {"scores": {"type": "array", "description": "Điểm từng ảnh được đưa (1–5) theo bộ tiêu chuẩn; photo = số ảnh, từ 1",
                               "items": {"type": "object", "additionalProperties": False, "required": ["photo", "score", "issue"],
                                         "properties": {"photo": {"type": "integer"}, "score": {"type": "integer"},
                                                        "issue": {"type": "string"}}}},
                    "photos": {"type": "array", "items": {"type": "integer"},
-                              "description": "Số thứ tự ảnh được chọn, theo thứ tự đăng (ảnh đầu hiện to nhất)"},
+                              "description": "Số ảnh được chọn (từ 1), theo thứ tự đăng (ảnh đầu hiện to nhất)"},
                    "text": {"type": "string", "description": "Nội dung bài đăng hoàn chỉnh"},
                    "note": {"type": "string", "description": "Ghi chú ngắn cho người duyệt"}}}}
 
@@ -118,8 +138,8 @@ def samples(channel=None, limit=8):
 def system_prompt(channel, limit=8):
     """→ (lời dặn hệ thống, có giới thiệu hoặc bài mẫu không)."""
     name = channel.name if channel else "của công ty"
-    parts = [f"Bạn là biên tập viên nội dung của Trang Facebook \"{name}\". Bạn soạn bài đăng Facebook từ ảnh công trình thật "
-             "để người duyệt xem trước khi đăng."]
+    parts = [f"Bạn là biên tập viên nội dung, am hiểu kỹ thuật xây dựng và hoàn thiện nhà, của Trang Facebook \"{name}\". "
+             "Bạn soạn bài đăng Facebook (từ ảnh công trình thật nếu có) để người duyệt xem trước khi đăng."]
     brief = (channel.brief or "").strip() if channel else ""
     if brief:
         parts.append("GIỚI THIỆU TRANG (người quản lý Trang viết; viết đúng thương hiệu, dịch vụ, cách xưng hô, câu kêu gọi, "
@@ -150,19 +170,32 @@ def _image_blocks(items):
             continue
         when = f", ngày {asset.taken_on:%d/%m/%Y}" if asset.taken_on else ""
         flaws = f"; đo kỹ thuật: {asset.flaws}" if asset.flaws else ""
-        blocks.append({"type": "text", "text": f"Ảnh số {index}: {asset.context or 'không có mô tả'}{when}{flaws}"})
+        blocks.append({"type": "text", "text": f"Ảnh số {index + 1}: {asset.context or 'không có mô tả'}{when}{flaws}"})
         blocks.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                    "data": base64.b64encode(data).decode()}})
     return blocks
 
 
 def template_text(items, brief="", channel=None):
-    """Chữ mẫu khi chưa bật AI: không gắn thương hiệu nào ngoài tên Trang (người duyệt sửa trước khi đăng)."""
+    """AI chưa viết được: CHỮ TẠM ghi rõ (không chép yêu cầu thành bài, không giả là bài đã viết); không duyệt được tới khi sửa."""
     works = list(dict.fromkeys(a.context.split(" · ")[0] for a in items if a.context and not a.context.startswith("ảnh chung")))
-    topic = brief or (", ".join(works[:3]).lower() if works else "hình ảnh thi công")
-    who = channel.name if channel else "chúng tôi"
-    return (f"✨ Cập nhật công trình: {topic}.\n\nTừng chi tiết được đội ngũ thi công tỉ mỉ, đúng thiết kế. "
-            f"Anh chị cần tư vấn, nhắn tin cho {who} nhé!")
+    lines = [PLACEHOLDER]
+    if brief:
+        lines.append(f"Chủ đề được giao: {brief}")
+    if works:
+        lines.append("Ảnh: " + ", ".join(works[:3]).lower())
+    lines.append("Bấm ✍ Sửa chữ để viết bài, hoặc trả lời tin này để nhờ trợ lý viết lại.")
+    return "\n".join(lines)
+
+
+def why_no_ai():
+    """Vì sao trợ lý nội dung không gọi được AI (để ghi chú cho người duyệt, không giả là đã viết)."""
+    import os
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return "chưa bật trợ lý AI (máy chủ chưa có khoá Claude)"
+    if ai.month_cost(purpose=ai.CONTENT) >= ai.cap(ai.CONTENT):
+        return f"đã dùng hết trần {ai.cap(ai.CONTENT):g} USD tháng này cho bài đăng"
+    return "chưa bật trợ lý AI"
 
 
 def _record_scores(items, scores):
@@ -181,25 +214,30 @@ def write(items, brief="", channel=None, pinned=()):
     items = list(items)
     pinned = {a.pk for a in pinned}
     system, known = system_prompt(channel)
-    if ai.available() and items:
-        ask = ("Soạn một bài đăng từ các ảnh trên." + (f" Yêu cầu của người giao bài: {brief}" if brief else "")
-               + " Trả về JSON theo khuôn.")
-        try:
-            response = ai.create_message(model=ai.model(), max_tokens=4000,
+    problem = ""
+    if ai.available(ai.CONTENT):
+        ask = ("Soạn một bài đăng từ các ảnh trên." if items else "Soạn một bài đăng (chưa có ảnh kèm).")
+        if brief:
+            ask += f"\n\nYÊU CẦU CỦA NGƯỜI GIAO BÀI (ý chính, khai thác sâu theo CÁCH VIẾT): {brief}"
+        ask += "\n\nTrả về JSON theo khuôn."
+        content = [*_image_blocks(items), {"type": "text", "text": ask}] if items else ask
+        name = ai.model(ai.CONTENT)
+        try:      # bài dài + suy nghĩ thích ứng: chạy nền (jobs), chờ tới 4 phút
+            response = ai.create_message(model=name, max_tokens=16000, timeout=240.0,
                                          system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-                                         messages=[{"role": "user", "content": [*_image_blocks(items), {"type": "text", "text": ask}]}],
-                                         output_config={"effort": "medium", "format": SCHEMA})
-            ai._record(response.usage)
+                                         messages=[{"role": "user", "content": content}],
+                                         output_config={"effort": "high", "format": SCHEMA})
+            ai._record(response.usage, ai.CONTENT, name)
             if response.stop_reason == "refusal":
                 raise ValueError("refusal")
             data = json.loads(next(b.text for b in response.content if b.type == "text"))
             scores = {}
             for row in data.get("scores") or []:
-                index, score = row.get("photo"), row.get("score")
-                if isinstance(index, int) and 0 <= index < len(items) and isinstance(score, int):
-                    scores[index] = min(5, max(1, score))
+                number, score = row.get("photo"), row.get("score")
+                if isinstance(number, int) and 1 <= number <= len(items) and isinstance(score, int):
+                    scores[number - 1] = min(5, max(1, score))
             _record_scores(items, scores)
-            wanted = [i for i in dict.fromkeys(data.get("photos") or []) if isinstance(i, int) and 0 <= i < len(items)]
+            wanted = [n - 1 for n in dict.fromkeys(data.get("photos") or []) if isinstance(n, int) and 1 <= n <= len(items)]
             chosen = [items[i] for i in wanted if items[i].pk in pinned or scores.get(i, MIN_SCORE) >= MIN_SCORE]
             dropped = [i + 1 for i in wanted if items[i] not in chosen]
             text = str(data.get("text") or "").strip()
@@ -211,11 +249,17 @@ def write(items, brief="", channel=None, pinned=()):
                         if a.pk in pinned and scores.get(items.index(a), MIN_SCORE) < MIN_SCORE]
                 if weak:
                     note += " ⚠ Ảnh người giao bài gửi bị chấm thấp: " + ", ".join(weak) + "."
+                if not chosen:
+                    note += " Bài chưa có ảnh: trả lời (reply) tin BÀI NHÁP bằng ảnh để thêm ảnh."
                 return {"text": text, "assets": chosen[:10], "note": (note + _voice_note(channel, known)).strip()[:1000],
                         "ai": True}
-        except Exception as error:      # mạng/khoá/khuôn lỗi: vẫn có bài nháp để người duyệt sửa
+            problem = "AI trả về bài trống"
+        except Exception as error:      # mạng/khoá/khuôn lỗi: vẫn có bài nháp (chữ tạm) để người duyệt xử lý
             log.warning("AI soạn bài lỗi (%s)", type(error).__name__)
-    note = "Chưa bật trợ lý AI (hoặc AI lỗi): chữ mẫu, cần sửa trước khi duyệt." if items else "Kho chưa có ảnh phù hợp."
+            problem = "AI từ chối viết chủ đề này" if str(error) == "refusal" else f"AI lỗi ({type(error).__name__})"
+    note = f"⚠ AI chưa viết được bài này ({problem or why_no_ai()}): đây là CHỮ TẠM, không duyệt được tới khi sửa chữ."
+    if not items:
+        note += " Bài chưa có ảnh."
     return {"text": template_text(items[:6], brief, channel), "assets": items[:6], "note": note + _voice_note(channel, known),
             "ai": False}
 
@@ -299,17 +343,22 @@ REVISE = {"type": "json_schema", "schema": {"type": "object", "additionalPropert
 
 
 def revise(post, instruction):
-    """Người duyệt nhắn "AI: ngắn hơn…" → chữ mới (giữ quy tắc không tên/địa chỉ/giá). None nếu chưa bật AI hoặc lỗi."""
-    if not ai.available() or not instruction:
+    """Người duyệt nhắn "AI: ngắn hơn…" / trả lời bản nháp → chữ mới. None nếu chưa bật AI hoặc lỗi (lý do: why_no_ai)."""
+    if not ai.available(ai.CONTENT) or not instruction:
         return None
     system, _ = system_prompt(post.channels.order_by("name").first() or primary_channel(), 4)
+    current = post.text if PLACEHOLDER not in post.text else "(chưa có bài: viết mới theo yêu cầu)\n" + post.text
+    ask = (f"Bài hiện tại:\n{current}\n\nYÊU CẦU SỬA CỦA NGƯỜI DUYỆT: {instruction}\n\n"
+           "Làm đúng yêu cầu. Yêu cầu thêm ý, viết sâu hơn thì khai thác bằng kiến thức chuyên môn theo CÁCH VIẾT. Người duyệt "
+           "quyết định nội dung: họ yêu cầu nêu tên khu đô thị, dự án thì được nêu; vẫn không nêu tên chủ nhà, số nhà, số điện "
+           "thoại, giá. Trả về JSON với bài đã sửa hoàn chỉnh.")
+    name = ai.model(ai.CONTENT)
     try:
-        response = ai.create_message(model=ai.model(), max_tokens=3000,
+        response = ai.create_message(model=name, max_tokens=8000, timeout=180.0,
                                      system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-                                     messages=[{"role": "user", "content": f"Bài hiện tại:\n{post.text}\n\nYêu cầu sửa của người duyệt: "
-                                                                           f"{instruction}\n\nTrả về JSON với bài đã sửa hoàn chỉnh."}],
-                                     output_config={"effort": "low", "format": REVISE})
-        ai._record(response.usage)
+                                     messages=[{"role": "user", "content": ask}],
+                                     output_config={"effort": "medium", "format": REVISE})
+        ai._record(response.usage, ai.CONTENT, name)
         if response.stop_reason == "refusal":
             return None
         text = str(json.loads(next(b.text for b in response.content if b.type == "text")).get("text") or "").strip()

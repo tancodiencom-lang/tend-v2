@@ -12,6 +12,7 @@ Bài kiểm thay `request` bằng hàm giả, không gọi mạng.
 import json
 import logging
 import os
+import re
 import socket
 import time
 import urllib.error
@@ -35,6 +36,45 @@ class FacebookError(Exception):
 def account_token(account=""):
     name = "TEND_META_TOKEN" + (f"_{account.strip().upper()}" if account and account.strip() else "")
     return os.environ.get(name, "").strip()
+
+
+MONTHS = {m: i for i, m in enumerate(("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1)}
+FIX_TOKEN = "thay khoá TEND_META_TOKEN trong .env trên máy chủ (khoá Trang, \"Expires: Never\"), khởi động lại Tend rồi bấm Thử lại"
+
+
+def _expired_at(message):
+    """"Session has expired on Friday, 20-Nov-26 00:00:00 PST" → "15:00 20/11/2026" (giờ Việt Nam) hoặc ""."""
+    found = re.search(r"expired on \w+, (\d{1,2})-(\w{3})-(\d{2}) (\d{2}):(\d{2}):\d{2} (PST|PDT)", message)
+    if not found or found.group(2) not in MONTHS:
+        return ""
+    from datetime import datetime, timedelta, timezone as tz
+    day, month, year, hour, minute = (int(found.group(1)), MONTHS[found.group(2)], 2000 + int(found.group(3)),
+                                      int(found.group(4)), int(found.group(5)))
+    offset = -8 if found.group(6) == "PST" else -7
+    moment = datetime(year, month, day, hour, minute, tzinfo=tz(timedelta(hours=offset))).astimezone(tz(timedelta(hours=7)))
+    return f"{moment:%H:%M %d/%m/%Y}"
+
+
+def vietnamese(code, subcode, message):
+    """Lỗi Graph API → câu tiếng Việt kèm cách xử lý (giữ mã lỗi gốc ngắn gọn để tra cứu)."""
+    text = message or ""
+    if code == 190:
+        when = _expired_at(text)
+        if when or "expired" in text.lower():
+            return f"Khoá Facebook đã hết hạn{f' lúc {when} (giờ Việt Nam)' if when else ''}: {FIX_TOKEN}. [mã 190]"
+        if "parse" in text.lower() or "malformed" in text.lower():
+            return f"Khoá Facebook trong .env không đúng dạng (thừa dấu < >, ngoặc kép, dấu cách?): {FIX_TOKEN}. [mã 190]"
+        return f"Khoá Facebook không còn hiệu lực (đổi mật khẩu Facebook, thu hồi quyền ứng dụng?): {FIX_TOKEN}. [mã 190]"
+    if code in (10, 200) or 200 <= (code or 0) <= 299:
+        return ("Khoá Facebook thiếu quyền đăng bài trên Trang (cần pages_manage_posts, pages_read_engagement, pages_show_list và "
+                f"tài khoản là quản trị Trang): tạo lại khoá có đủ quyền. [mã {code}]")
+    if code in (4, 17, 32, 613):
+        return f"Facebook tạm giới hạn số lần gọi: chờ khoảng 1 giờ rồi bấm Thử lại. [mã {code}]"
+    if code == 100 and "does not exist" in text.lower():
+        return f"Không tìm thấy Trang hoặc bài trên Facebook: kiểm tra Mã Trang ở Nội dung › Cài đặt. [mã {code}]"
+    if code in (1, 2):
+        return f"Facebook đang lỗi tạm thời: chờ vài phút rồi bấm Thử lại. [mã {code}]"
+    return f"Facebook báo lỗi [mã {code}{f'/{subcode}' if subcode else ''}]: {text}"
 
 
 def _multipart(fields, files):
@@ -68,7 +108,7 @@ def request(method, path, params=None, token="", files=None):
     except urllib.error.HTTPError as error:       # Facebook trả lỗi: lệnh không thực hiện (5xx: chưa chắc)
         try:
             detail = json.loads(error.read().decode()).get("error", {})
-            message = f"{detail.get('type', 'Lỗi')} {detail.get('code', '')}: {detail.get('message', '')}".strip()
+            message = vietnamese(detail.get("code"), detail.get("error_subcode"), detail.get("message", ""))
         except Exception:
             message = f"HTTP {error.code}"
         raise FacebookError(message[:400], error.code, sent=error.code >= 500)

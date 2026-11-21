@@ -15,14 +15,14 @@ from chat.models import ChatLink
 from projects.models import Project
 
 from . import assets as asset_files
-from . import publish, services, writer
+from . import jobs, publish, services, writer
 from .models import Channel, Idea, Post, PostTarget
 
 PREFIX = "📣 Nội dung: "
 COMMANDS = ("/ytuong", "/baiviet", "/noidung")
-HELP = ("• Nội dung số (Giám đốc, Marketing): /baiviet [TN-22] <yêu cầu> — trợ lý soạn bài ngay (gửi ảnh trước nếu có); "
-        "/ytuong <ý tưởng> — để dành cho bài hằng ngày; /noidung — bài chờ duyệt, /noidung 12 — xem lại bài #12; "
-        "trả lời (reply) vào tin BÀI NHÁP kèm ý muốn sửa để trợ lý sửa bài đó.")
+HELP = ("• Nội dung số (Giám đốc, Marketing): /baiviet [TN-22] <yêu cầu> — trợ lý viết bài (gửi ảnh trước hoặc kèm ảnh; "
+        "1–3 phút có bản duyệt); /ytuong <ý tưởng> — để dành cho bài hằng ngày; /noidung — bài chờ duyệt, /noidung 12 — xem "
+        "lại bài #12; trả lời (reply) tin BÀI NHÁP kèm ý muốn sửa để trợ lý sửa bài đó, hoặc kèm ảnh để thêm ảnh.")
 PREVIEW = re.compile(r"BÀI NHÁP #(\d+)")
 
 
@@ -51,7 +51,7 @@ def anchor_text(post):
     if post.note:
         lines.append(f"Ghi chú trợ lý: {post.note}")
     lines.append("Bấm ✓ Duyệt và đăng khi chữ, ảnh, thứ tự và Trang đều đúng. Muốn sửa: trả lời (reply) tin này kèm ý muốn sửa "
-                 "để trợ lý sửa, hoặc bấm ✍ Sửa chữ để thay nguyên văn. Sửa/đổi ảnh xong bot gửi lại bản mới.")
+                 "để trợ lý sửa (hoặc kèm ảnh để thêm ảnh), hoặc bấm ✍ Sửa chữ để thay nguyên văn. Sửa xong bot gửi lại bản mới.")
     return "\n".join(lines)
 
 
@@ -172,9 +172,8 @@ def edit_text(link_row, post_id, text):
         return "Không tìm thấy bài."
     try:
         if text.strip().casefold().startswith("ai:"):
-            text = writer.revise(post, text.strip()[3:].strip())
-            if text is None:
-                return "Trợ lý AI chưa bật hoặc đang lỗi: nhắn chữ mới (thay nguyên văn)."
+            jobs.request_revise(link_row.user, post, text.strip()[3:].strip())
+            return f"✍ Trợ lý đang sửa bài #{post.pk} theo ý (khoảng 1 phút), xong gửi lại bản mới."
         post = services.set_text(link_row.user, post, text)
     except (PermissionDenied, ValidationError) as error:
         return "; ".join(getattr(error, "messages", [str(error)]))
@@ -192,16 +191,45 @@ def reply_edit(link_row, post_id, text):
     instruction = text.strip()
     if instruction.casefold().startswith("ai:"):
         instruction = instruction[3:].strip()
-    if post.state not in services.EDITABLE:
-        return f"Bài #{post.pk} đang ở trạng thái \"{post.get_state_display().lower()}\", không sửa được."
-    new_text = writer.revise(post, instruction)
-    if new_text is None:
-        return (f"Trợ lý AI chưa bật hoặc đang lỗi nên chưa sửa bài #{post.pk} theo ý được. Bấm ✍ Sửa chữ trên bản duyệt "
-                "rồi nhắn nguyên văn chữ mới.")
+    if not jobs._ai_ready():
+        return (f"Trợ lý chưa sửa bài #{post.pk} theo ý được: {writer.why_no_ai()}. Bấm ✍ Sửa chữ trên bản duyệt rồi nhắn "
+                "nguyên văn chữ mới.")
     try:
-        post = services.set_text(link_row.user, post, new_text)
+        jobs.request_revise(link_row.user, post, instruction)
     except (PermissionDenied, ValidationError) as error:
         return "; ".join(getattr(error, "messages", [str(error)]))
+    return f"✍ Trợ lý đang sửa bài #{post.pk} theo ý (khoảng 1 phút), xong gửi lại bản mới."
+
+
+def reply_photo(link_row, post_id, photo, album=""):
+    """Trả lời bản nháp bằng ảnh = thêm ảnh vào bài đó. Ảnh lẻ: gửi lại bản mới ngay; album: báo một lần, xem bằng /noidung."""
+    if not link_row.user.does_marketing:
+        return "Sửa bài đăng dành cho Giám đốc và nhân viên Marketing."
+    post = _post(post_id)
+    if post is None:
+        return "Không tìm thấy bài."
+    try:
+        with photo.image.open("rb") as handle:
+            data = handle.read()
+    except OSError:
+        return "Không đọc được ảnh, gửi lại giúp."
+    asset = asset_files.add_upload(link_row.user, data, photo.image.name.rsplit("/", 1)[-1],
+                                   context=re.sub(r"^/\S+\s*", "", photo.caption or ""))
+    if asset is None:
+        return "Ảnh không dùng được (không phải ảnh hoặc quá lớn)."
+    photo.target = "noi-dung"
+    photo.save(update_fields=["target"])
+    try:
+        post = services.add_asset(link_row.user, post, asset)
+    except (PermissionDenied, ValidationError) as error:
+        return "; ".join(getattr(error, "messages", [str(error)]))
+    if album:
+        state = link_row.state or {}
+        if state.get("mkt_album") == album:
+            return None
+        link_row.state = {**state, "mkt_album": album}
+        link_row.save(update_fields=["state"])
+        return f"✓ Đang thêm các ảnh vào bài #{post.pk}. Xem bản mới: /noidung {post.pk}"
     send_preview(post, [link_row])
     return None
 
@@ -223,7 +251,8 @@ def _sent_photos(link_row):
                 data = handle.read()
         except OSError:
             continue
-        asset = asset_files.add_upload(link_row.user, data, photo.image.name.rsplit("/", 1)[-1], context=photo.caption)
+        asset = asset_files.add_upload(link_row.user, data, photo.image.name.rsplit("/", 1)[-1],
+                                       context=re.sub(r"^/\S+\s*", "", photo.caption or ""))
         photo.target = "noi-dung"
         photo.save(update_fields=["target"])
         if asset is not None:
@@ -256,13 +285,12 @@ def command(link_row, name, text):
         return f"✓ Đã ghi ý tưởng #{idea.pk}. Trợ lý dùng cho bài hằng ngày (ưu tiên ý tưởng cũ trước)."
     if name == "/baiviet":
         items = _sent_photos(link_row)
-        idea = services.add_idea(user, rest or "Bài từ ảnh vừa gửi", Idea.Kind.REQUEST, project)
-        post = writer.draft(timezone.localdate(), project=project, idea=idea, brief=rest, origin=Post.Origin.REQUEST, user=user,
-                            items=items)
-        if post is None:
-            return "Chưa soạn được: kho chưa có ảnh phù hợp. Gửi ảnh trước rồi nhắn /baiviet <yêu cầu>."
-        send_preview(post)
-        return None
+        if not rest and not items:
+            return "Nhắn /baiviet kèm chủ đề, vd: /baiviet dầm tum thang máy hay bị bỏ sót — vì sao, hậu quả, cách làm đúng."
+        jobs.request_draft(user, rest, project, None, items)
+        note = "" if jobs._ai_ready() else f" (Lưu ý: {writer.why_no_ai()}, bản nháp sẽ là chữ tạm.)"
+        return (f"✍ Trợ lý đang viết bài{f' với {len(items)} ảnh anh/chị gửi' if items else ''} (khoảng 1–3 phút), xong gửi "
+                f"bản duyệt qua đây.{note}")
     return None
 
 

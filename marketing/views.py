@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET, require_POST
 from projects.models import Project
 
 from . import assets as asset_files
-from . import bot, publish, quality, services, writer
+from . import bot, jobs, publish, quality, services, writer
 from .models import Asset, Channel, Idea, Post, PostTarget, StyleSample
 
 
@@ -49,6 +49,7 @@ def index(request):
         "projects": Project.objects.filter(active=True).order_by("code"),
         "channels": Channel.objects.filter(active=True),
         "asset_count": Asset.objects.filter(blocked=False).count(),
+        "jobs": jobs.recent(),
         "sample_count": StyleSample.objects.filter(active=True).count(),
     })
 
@@ -75,7 +76,8 @@ def post_action(request, pk, action):
     index = int(data.get("i", -1)) if str(data.get("i", "")).lstrip("-").isdecimal() else -1
     calls = {
         "sua": (lambda: services.set_text(user, post, data.get("text", ""), channel="web"), "Đã lưu chữ mới (cần duyệt lại)."),
-        "ai-sua": (lambda: _ai_revise(user, post, data.get("instruction", "")), "Trợ lý đã sửa theo ý (cần duyệt lại)."),
+        "ai-sua": (lambda: jobs.request_revise(user, post, data.get("instruction", ""), via="web"),
+                   "Trợ lý đang sửa theo ý (khoảng 1 phút): tải lại trang để xem bản mới, bản duyệt cũng gửi qua Telegram."),
         "duyet": (lambda: services.approve(user, post, data.get("sha", ""), channel="web"),
                   "Đã duyệt. Trợ lý đăng trong vài phút và báo đường dẫn qua Telegram."),
         "bo": (lambda: services.reject(user, post, data.get("reason", ""), channel="web"), "Đã bỏ bài."),
@@ -96,13 +98,6 @@ def post_action(request, pk, action):
     return redirect("marketing_post", pk=post.pk)
 
 
-def _ai_revise(user, post, instruction):
-    text = writer.revise(post, instruction)
-    if text is None:
-        raise ValidationError("Trợ lý AI chưa bật hoặc đang lỗi. Sửa chữ trực tiếp ở ô bên trên.")
-    return services.set_text(user, post, text, channel="web")
-
-
 @login_required
 @require_POST
 def idea_add(request):
@@ -110,18 +105,12 @@ def idea_add(request):
     data = request.POST
     project = Project.objects.filter(pk=data.get("project") or 0).first()
     channel = Channel.objects.filter(pk=data.get("channel") or 0, active=True).first()      # trống = Trang mặc định
-    kind = Idea.Kind.REQUEST if data.get("now") == "1" else Idea.Kind.IDEA
-    idea = _say(request, lambda: services.add_idea(request.user, data.get("text", ""), kind, project, channel="web"),
-                "Đã ghi ý tưởng." if kind == Idea.Kind.IDEA else "")
-    if idea is not None and kind == Idea.Kind.REQUEST:
-        post = writer.draft(timezone.localdate(), project=project, idea=idea, brief=idea.text, origin=Post.Origin.REQUEST,
-                            user=request.user, channel=channel)
-        if post is None:
-            messages.error(request, "Kho chưa có ảnh phù hợp để soạn bài. Tải ảnh lên Kho ảnh rồi giao lại.")
-            return redirect("marketing")
-        bot.send_preview(post)
-        messages.success(request, f"Trợ lý đã soạn bài #{post.pk}, gửi người duyệt qua Telegram.")
-        return redirect("marketing_post", pk=post.pk)
+    text = data.get("text", "")
+    if data.get("now") == "1":
+        _say(request, lambda: jobs.request_draft(request.user, text.strip(), project, channel, via="web"),
+             "Trợ lý đang viết bài (khoảng 1–3 phút). Bản duyệt hiện ở trang này và gửi qua Telegram.")
+    else:
+        _say(request, lambda: services.add_idea(request.user, text, Idea.Kind.IDEA, project, channel="web"), "Đã ghi ý tưởng.")
     return redirect("marketing")
 
 
@@ -138,10 +127,10 @@ def asset_list(request):
     _marketing(request)
     if request.method == "POST":
         project = Project.objects.filter(pk=request.POST.get("project") or 0).first()
-        added = 0
+        before = Asset.objects.count()
         for upload in request.FILES.getlist("images")[:30]:
-            if asset_files.add_upload(request.user, upload.read(), upload.name, project, request.POST.get("context", "")):
-                added += 1
+            asset_files.add_upload(request.user, upload.read(), upload.name, project, request.POST.get("context", ""))
+        added = Asset.objects.count() - before
         messages.success(request, f"Đã thêm {added} ảnh vào kho (ảnh trùng hoặc không phải ảnh được bỏ qua).")
         return redirect("marketing_assets")
     rows = Asset.objects.select_related("project").order_by("-taken_on", "-pk")

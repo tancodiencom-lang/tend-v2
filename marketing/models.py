@@ -232,3 +232,40 @@ class StyleSample(models.Model):
         verbose_name = "Bài mẫu giọng văn"
         verbose_name_plural = "Bài mẫu giọng văn"
         ordering = ["-created_at"]
+
+
+class WriteJob(models.Model):
+    """Việc viết bài CHẠY NỀN (soạn bài được giao, sửa bài theo ý): mô hình viết bài dài mất 1–3 phút, quá giờ chờ của web
+    và Telegram. Bot/web ghi việc rồi trả lời ngay; tiến trình nền (manage.py viet_bai) làm và gửi bản duyệt."""
+
+    class Kind(models.TextChoices):
+        DRAFT = "soan", "Soạn bài"
+        REVISE = "sua", "Sửa theo ý"
+
+    class State(models.TextChoices):
+        WAITING = "cho", "Chờ viết"
+        RUNNING = "dang", "Đang viết"
+        DONE = "xong", "Xong"
+        FAILED = "loi", "Không viết được"
+
+    kind = models.CharField(max_length=4, choices=Kind.choices)
+    state = models.CharField(max_length=4, choices=State.choices, default=State.WAITING)
+    idea = models.ForeignKey(Idea, on_delete=models.PROTECT, null=True, blank=True, related_name="jobs")
+    post = models.ForeignKey(Post, on_delete=models.PROTECT, null=True, blank=True, related_name="jobs")
+    channel = models.ForeignKey(Channel, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    project = models.ForeignKey(Project, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    instruction = models.TextField("Yêu cầu", max_length=4000, blank=True)
+    photos = models.JSONField("Ảnh gửi kèm (mã ảnh kho, theo thứ tự)", default=list, blank=True)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    via = models.CharField(max_length=10, default="telegram")
+    error = models.CharField(max_length=500, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Việc viết bài"
+        verbose_name_plural = "Việc viết bài"
+        ordering = ["-pk"]
+
