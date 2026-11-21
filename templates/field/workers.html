@@ -2,7 +2,7 @@
 {% block content %}
 <h1>Nhân sự được chấm công</h1>
 {% for m in messages %}<p class="{% if m.tags == 'error' %}bad{% else %}good{% endif %}">{{ m }}</p>{% endfor %}
-<p class="muted">Mỗi người một <b>mã NS</b> cố định (không đổi, không dùng lại); họ tên sửa được, có nhật ký. Bot khớp theo tên hoặc mã khi chấm
+<p class="muted">Mỗi người một <b>mã NS</b> cố định (không đổi, không dùng lại); họ tên sửa được, có nhật ký. Trợ lý Telegram khớp theo tên hoặc mã khi chấm
 công (vd "Công Thắng phụ, NS-0012"). {% if can_edit %}Đơn giá mới áp dụng <b>từ ngày</b> anh/chị chọn — công đã qua giữ giá cũ.
 Lương tháng (giám sát…) chia vào công trình theo tỷ lệ ngày có mặt.{% endif %} Người nghỉ: bỏ tích "Đang làm", không xoá.</p>
 {% if can_add %}<details class="box"{% if not rows %} open{% endif %}><summary><b>+ Thêm nhân sự</b> <span class="muted">(mã tự cấp)</span></summary>
@@ -21,7 +21,7 @@ Lương tháng (giám sát…) chia vào công trình theo tỷ lệ ngày có m
 <h2>Tổ thợ theo công trình</h2>
 <p class="muted"><b>Tổ khoán của công ty</b>: báo cáo chỉ cần tên tổ + số người (vd "tổ xây: 3 thợ 2 phụ"), tiền nằm ở khoản khoán; số công
 theo tổ để dự đoán chi phí nhân công sau. <b>Tổ của chủ nhà</b> (chủ nhà ký trực tiếp, vd tổ điện): ghi số người + việc để phối hợp, không
-tính chi phí. Thợ <b>công nhật</b> không phải tổ: ghi tên từng người. Tổ mới do bot hỏi giám sát khi gặp lần đầu.</p>
+tính chi phí. Thợ <b>công nhật</b> không phải tổ: ghi tên từng người. Tổ mới do trợ lý Telegram hỏi giám sát khi gặp lần đầu.</p>
 {% if teams %}<div class="scroll"><table class="grid"><thead><tr><th>Công trình</th><th>Tổ</th><th>Loại</th><th>Đối tượng trong sổ thu chi</th><th>Trạng thái</th>{% if can_edit %}<th>Sửa</th>{% endif %}</tr></thead><tbody>
 {% for t in teams %}<tr><td>{{ t.project.code }}</td><td>Tổ {{ t.name }}</td>
 {% if can_edit %}<td colspan="4"><form method="post" class="row-form">{% csrf_token %}<input type="hidden" name="action" value="team"><input type="hidden" name="id" value="{{ t.pk }}">
@@ -30,7 +30,7 @@ tính chi phí. Thợ <b>công nhật</b> không phải tổ: ghi tên từng ng
   <label class="check"><input type="checkbox" name="active" value="1"{% if t.active %} checked{% endif %}> Đang làm</label>
   <button class="btn" type="submit">Lưu</button></form></td>
 {% else %}<td>{% if t.kind == "chu_nha" %}● {% else %}▲ {% endif %}{{ t.get_kind_display }}</td><td>{{ t.party.name|default:"—" }}</td><td>{% if t.active %}Đang làm{% else %}▼ Thôi{% endif %}</td>{% endif %}</tr>{% endfor %}
-</tbody></table></div>{% else %}<p class="muted">Chưa có tổ nào. Giám sát nhắn "tổ xây: 3 thợ 2 phụ" trong báo cáo, bot sẽ hỏi loại tổ một lần.</p>{% endif %}
+</tbody></table></div>{% else %}<p class="muted">Chưa có tổ nào. Giám sát nhắn "tổ xây: 3 thợ 2 phụ" trong báo cáo, trợ lý sẽ hỏi loại tổ một lần.</p>{% endif %}
 <h2>Nhân sự có tên</h2>
 <div class="cards">{% for r in rows %}{% with w=r.worker %}
 <section class="card worker{% if not w.active %} off{% endif %}"><header><b>{{ w.code|default:"(chưa có mã)" }} · {{ w.name }}</b>
@@ -48,5 +48,5 @@ tính chi phí. Thợ <b>công nhật</b> không phải tổ: ghi tên từng ng
 </form>
 {% if r.rates %}<p class="muted">Lịch sử đơn giá: {% for x in r.rates %}{{ x.amount|vnd|default:"bỏ giá" }} ({{ x.get_pay_display|lower }}) từ {% if x.start.year == 2000 %}đầu{% else %}{{ x.start|date:"d/m/Y" }}{% endif %}{% if not forloop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 {% else %}<p>{{ w.get_kind_display }} · {{ w.team|default:"Chưa có tổ" }} · {{ w.get_pay_display }}{% if money %} · {{ w.day_rate|vnd|default:"chưa có đơn giá" }}{% endif %}</p>{% endif %}
-</section>{% endwith %}{% empty %}<p class="missing">Chưa có nhân sự. Thêm ở trên, hoặc giám sát chấm công qua bot là có danh sách.</p>{% endfor %}</div>
+</section>{% endwith %}{% empty %}<p class="missing">Chưa có nhân sự. Thêm ở trên, hoặc giám sát chấm công qua trợ lý Telegram là có danh sách.</p>{% endfor %}</div>
 {% endblock %}

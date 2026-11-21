@@ -227,7 +227,7 @@ def _add_worker(request, can_edit):
     except (ValidationError, PermissionDenied) as error:
         messages.error(request, "; ".join(getattr(error, "messages", [str(error)])))
     else:
-        messages.success(request, f"Đã thêm {worker.code} {worker.name}. Chấm công qua bot ghi tên hoặc mã {worker.code} là khớp.")
+        messages.success(request, f"Đã thêm {worker.code} {worker.name}. Chấm công qua trợ lý Telegram ghi tên hoặc mã {worker.code} là khớp.")
     return redirect("field_workers")
 
 

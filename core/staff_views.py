@@ -73,7 +73,7 @@ def staff_edit(request, pk):
                 messages.success(request, f"Đã đặt mật khẩu tạm cho {person.username}. Lần đăng nhập tới phải đổi mật khẩu.")
             elif action == "lock":
                 accounts.set_active(request.user, person, False, request.POST.get("reason"))
-                messages.success(request, f"Đã khoá {person.username}: không đăng nhập được, bot ngừng làm việc với người này.")
+                messages.success(request, f"Đã khoá {person.username}: không đăng nhập được, trợ lý Telegram ngừng làm việc với người này.")
             elif action == "unlock":
                 accounts.set_active(request.user, person, True)
                 messages.success(request, f"Đã mở khoá {person.username}.")

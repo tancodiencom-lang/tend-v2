@@ -4,7 +4,7 @@
 {% if user.sees_payables or user.role == "supervisor" %}<p><a class="btn plain" href="{% url 'field_workers' %}">Nhân sự và tổ thợ (mã, nghề, đơn giá, loại tổ)</a></p>{% endif %}
 <p class="muted">Từ báo cáo ngày qua Telegram. <b>Khối văn phòng</b>: giám sát gửi báo cáo là có mặt. <b>Khối công nhân</b>: thợ công nhật
 chấm theo tên (8 giờ = 1 công); tổ khoán ghi số người theo báo cáo, không cần tên. <b>Tổ của chủ nhà</b>: ghi để phối hợp, không tính tiền.
-Sửa công: nhắn bot <b>/suacong</b> kèm lý do.</p>
+Sửa công: nhắn trợ lý Telegram <b>/suacong</b> kèm lý do.</p>
 <form method="get" class="filters">
   <a class="btn plain" href="?thang={{ prev|date:'Y-m' }}{% if project %}&cong_trinh={{ project.code }}{% endif %}" aria-label="Tháng trước">‹</a>
   <input type="month" name="thang" value="{{ first|date:'Y-m' }}" aria-label="Tháng">

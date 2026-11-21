@@ -3,7 +3,7 @@
 <p><a href="{% url 'account' %}">‹ Tài khoản</a></p>
 <h1>Tài khoản đăng nhập</h1>
 <p class="muted">Mỗi người một tài khoản, một vai; vai quyết định xem/nhập gì, công trình được giao quyết định thấy công trình nào
-(Giám đốc thấy tất cả). Số điện thoại phải đúng số người đó dùng cho Telegram (bot xác minh khi kết nối). Nghỉ việc thì
+(Giám đốc thấy tất cả). Số điện thoại phải đúng số người đó dùng cho Telegram (trợ lý xác minh khi kết nối). Nghỉ việc thì
 <b>khoá</b>, không xoá — lịch sử giữ nguyên. Mọi thay đổi có nhật ký.</p>
 {% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
 <p><a class="btn" href="{% url 'staff_new' %}">+ Thêm tài khoản</a></p>

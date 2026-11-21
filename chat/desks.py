@@ -127,7 +127,7 @@ def current(link_row, now=None):
 
 def menu(user):
     rows = [f"@{desk.aliases[0]} — {desk.label}" for desk in DESKS if desk.allows(user)]
-    return "Gọi trợ lý:\n" + "\n".join(f"• {row}" for row in rows) + "\n• @dong — đóng, bot tự nhận biết như bình thường"
+    return "Gọi trợ lý:\n" + "\n".join(f"• {row}" for row in rows) + "\n• @dong — đóng, em tự nhận biết như bình thường"
 
 
 def welcome(desk, user):

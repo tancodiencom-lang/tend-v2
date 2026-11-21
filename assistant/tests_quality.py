@@ -88,7 +88,7 @@ class FreeReportTests(BotCase):
 
     def test_free_report_keeps_extra_work_plan_and_crew_scores_low(self):
         proposal = self.send_example(team=None)
-        self.assertIn('• tổ "thợ xây" ?: 5 người (3 thợ, 2 phụ) — bấm chọn ở tin bot hỏi', bot.summary(proposal))
+        self.assertIn('• tổ "thợ xây" ?: 5 người (3 thợ, 2 phụ) — bấm chọn ở tin em hỏi', bot.summary(proposal))
         self.assertIn("Còn thiếu: xác định tổ", bot.summary(proposal))
         self.assertIn("＋ Tổ khoán của ta", self.last_buttons(self.chats[self.site.pk]))
         self.press(self.site, f"tm:{str(proposal.pk)[:8]}:0:k")
@@ -99,7 +99,7 @@ class FreeReportTests(BotCase):
         self.assertIn("• Tầng 5 · Đánh lạnh tường phòng trong t5", summary)
         self.assertIn(f"Kế hoạch {timezone.localdate():%d/%m} (dự kiến, chưa phải việc đã làm):", summary)
         self.assertIn("• tổ thợ xây (khoán của ta, tổ mới): 5 người (3 thợ, 2 phụ)", summary)
-        self.assertIn("Lần sau nhắn theo mẫu này", summary)
+        self.assertIn("Lần sau anh/chị nhắn theo mẫu này", summary)
         self.assertIn("\n+ Cắt đục sàn bê tông sàn mái\n", bot.standard_text(proposal))
         self.assertIn("Nhân sự: tổ thợ xây 3 thợ 2 phụ", bot.standard_text(proposal))
         self.assertFalse(any("chưa có tên thợ" in t for t in self.texts(self.chats[self.site.pk])))    # tổ khoán: không đòi tên
@@ -170,7 +170,7 @@ class FreeReportTests(BotCase):
         self.assertEqual(report.asked, 3)
         score = quality.of(report)
         self.assertEqual(score.total, 90)
-        self.assertIn("bot phải hỏi lại 3 lần", score.missing)
+        self.assertIn("em phải hỏi lại 3 lần", score.missing)
 
     def test_project_asked_with_buttons_when_code_missing(self):
         other = Project.objects.create(code="HB-01", name="Hà Bắc")
@@ -278,7 +278,7 @@ class WeeklyStatsTests(BotCase):
         self.client.force_login(self.site)
         page = self.client.get(reverse("assistant"))
         self.assertContains(page, "Mức đầy đủ báo cáo của anh/chị")
-        self.assertNotContains(page, "Chỗ vướng bot tự ghi")
+        self.assertNotContains(page, "Chỗ vướng trợ lý tự ghi")
         rows = stats.supervisor_rows(self.site, *stats.week_of(timezone.localdate()))
         self.assertEqual([r["user"] for r in rows], [self.site])
         self.client.force_login(self.accountant)
