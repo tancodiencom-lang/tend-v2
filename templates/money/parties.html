@@ -19,8 +19,9 @@
   <label>Mã số thuế <input type="text" name="tax_code" value="{{ p.tax_code }}"></label>
   <label>Địa chỉ <input type="text" name="address" value="{{ p.address }}"></label>
   <label>Điện thoại <input type="text" name="phone" value="{{ p.phone }}"></label>
+  {% if can_terms and p.type != "khach" and p.type != "khac" %}<label>Số ngày được nợ <input type="text" name="terms_days" inputmode="numeric" value="{{ p.terms_days|default_if_none:'' }}" placeholder="chưa có"></label>{% endif %}
   <label class="check"><input type="checkbox" name="active" value="1"{% if p.active %} checked{% endif %}> Đang dùng</label>
   <button class="btn" type="submit">Lưu</button></form>
-{% else %}<p>{{ p.misa_code|default:"Chưa có mã MISA" }}{% if p.tax_code %} · MST {{ p.tax_code }}{% endif %}</p>{% endif %}
+{% else %}<p>{{ p.misa_code|default:"Chưa có mã MISA" }}{% if p.tax_code %} · MST {{ p.tax_code }}{% endif %}{% if p.terms_days is not None %} · được nợ {{ p.terms_days }} ngày{% endif %}</p>{% endif %}
 </section>{% endwith %}{% empty %}<p class="missing">Chưa có đối tượng. Bot thêm khi kế toán nhập phiếu.</p>{% endfor %}</div>
 {% endblock %}

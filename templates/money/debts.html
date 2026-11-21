@@ -2,13 +2,42 @@
 {% block content %}
 <p><a href="{% url 'reports' %}">‹ Báo cáo</a></p>
 <h1>Công nợ</h1>
-<p><a class="btn plain" href="?tai=xlsx">Tải Excel</a></p>
-{% for b in blocks %}<section class="box"><h2>{{ b.project }}</h2>
+{% for m in messages %}<p class="{% if m.tags == 'error' %}bad{% else %}good{% endif %}">{{ m }}</p>{% endfor %}
+<p><a class="btn plain" href="?tai=xlsx">Tải Excel</a>{% if user.sees_payables %} <a class="btn plain" href="?tai=tuoi-no">Tải tuổi nợ phải trả</a>{% endif %}</p>
+<p class="muted">Trợ lý kế toán gửi báo cáo công nợ tuần qua Telegram: sáng thứ Sáu phần phải trả (kế toán nội bộ + Giám đốc), sáng thứ Tư công nợ khách và dòng tiền (kế toán tài chính + Giám đốc). Xem ngay: lệnh /congnotuan.</p>
+{% for b in blocks %}<section class="box" id="ct-{{ b.project.pk }}"><h2>{{ b.project }}</h2>
 {% if b.pay %}{% with p=b.pay %}
 <h3>Nhà cung cấp · còn {{ p.supplier_debt|vnd }}</h3>{% if p.suppliers %}<ul class="lines">{% for s in p.suppliers %}<li><span>{{ s.name }}</span><span>nhận {{ s.goods|vnd }} · trả {{ s.paid|vnd }} · còn <b>{{ s.debt|vnd }}</b></span></li>{% endfor %}</ul>{% else %}<p class="muted">Chưa có.</p>{% endif %}
 <h3>Tổ thợ (khoán) · còn {{ p.team_debt|vnd }}</h3>{% if p.teams %}<ul class="lines">{% for s in p.teams %}<li><span>{{ s.name }}</span><span>được tính {{ s.work|vnd }} · trả {{ s.paid|vnd }} · còn <b>{{ s.debt|vnd }}</b></span></li>{% endfor %}</ul>{% else %}<p class="muted">Chưa có.</p>{% endif %}
 <p>Lương công nhật: ước tính {{ p.labor_accrued|vnd }} · đã trả {{ p.labor_paid|vnd }} · còn <b>{{ p.labor_debt|vnd }}</b>{% if p.missing_rates %} <span class="missing">· thiếu đơn giá: {{ p.missing_rates|join:", " }}</span>{% endif %}</p>
-{% endwith %}{% endif %}
-{% if b.customer %}<h3>Khách hàng</h3>{% if b.customer.remaining is not None %}<p>Hợp đồng {{ b.customer.contract|vnd }} · đã thu {{ b.customer.received|vnd }} · còn <b>{{ b.customer.remaining|vnd }}</b></p>{% else %}<p class="missing">Chưa có giá trị hợp đồng.</p>{% endif %}{% endif %}
+{% endwith %}
+{% if b.aging %}<details class="box"{% if b.aging_open %} open{% endif %}><summary><b>Hạn trả từng khoản còn nợ ({{ b.aging|length }})</b></summary>
+<p class="muted">Tiền đã trả trừ vào khoản nhận hàng / khoán cũ nhất trước. Hạn trả: ghi riêng từng khoản, không thì ngày phiếu + số ngày được nợ của đối tượng (trang Đối tượng).</p>
+<div class="scroll"><table class="grid"><thead><tr><th>Đối tượng</th><th>Phiếu</th><th>Còn nợ</th><th>Hạn trả</th>{% if can_set_due %}<th>Đặt / đổi hạn</th>{% endif %}</tr></thead><tbody>
+{% for r in b.aging %}<tr><td>{{ r.group }} · {{ r.name }}</td><td>{{ r.entry.number|default:"chưa có số" }} · {{ r.entry.date|date:"d/m/Y" }}</td><td>{{ r.remaining|vnd }}</td>
+<td>{% if r.status == "chua_han" %}<span class="missing">{{ r.label }}</span>{% else %}{{ r.label }}{% if not r.own_due %} <span class="muted">(theo số ngày được nợ)</span>{% endif %}{% endif %}</td>
+{% if can_set_due %}<td><form method="post" action="{% url 'money_set_due' r.entry.pk %}" class="row-form">{% csrf_token %}<input type="hidden" name="cong_trinh" value="{{ b.project.pk }}">
+<label>Hạn <input type="date" name="han" value="{{ r.due|date:'Y-m-d' }}" required></label>{% if r.own_due %}<label>Lý do đổi hạn <input type="text" name="ly_do" required placeholder="vd NCC đồng ý lùi hạn"></label>{% endif %}
+<button class="btn plain" type="submit">Lưu hạn</button></form></td>{% endif %}</tr>{% endfor %}
+</tbody></table></div></details>{% elif b.pay %}<p class="muted">Không còn khoản nhận hàng / khoán nào chưa trả.</p>{% endif %}
+{% endif %}
+{% if b.customer %}<h3>Khách hàng</h3>{% if b.customer.remaining is not None %}<p>Hợp đồng {{ b.customer.contract|vnd }} · đã thu {{ b.customer.received|vnd }} · còn <b>{{ b.customer.remaining|vnd }}</b></p>{% else %}<p class="missing">Chưa có giá trị hợp đồng.</p>{% endif %}
+<h3>Đợt thanh toán của khách</h3>
+{% if b.plan and b.plan.items %}<p class="muted">Tiền khách đã thu trừ vào đợt có hạn sớm nhất trước. Quá hạn hơn 3 ngày cần nhắc khách, hơn 15 ngày là Gấp.</p>
+<div class="scroll"><table class="grid"><thead><tr><th>Đợt</th><th>Số tiền</th><th>Hạn</th><th>Tình trạng</th>{% if can_plan %}<th>Huỷ đợt</th>{% endif %}</tr></thead><tbody>
+{% for i in b.plan.items %}<tr><td>số {{ i.installment.pk }} · {{ i.installment.name }}{% if i.installment.note %}<br><span class="muted">{{ i.installment.note }}</span>{% endif %}</td><td>{{ i.installment.amount|vnd }}</td><td>{{ i.installment.due_on|date:"d/m/Y" }}</td>
+<td>{% if i.status == "da_thu" %}✓ đã thu đủ{% elif i.status == "qua_han" %}{% if i.level == "gap" %}▼ GẤP · {% else %}▼ {% endif %}quá hạn {{ i.days }} ngày · còn {{ i.remaining|vnd }}{% elif i.status == "sap_han" %}● đến hạn {% if i.days == 0 %}hôm nay{% else %}trong {{ i.days }} ngày{% endif %} · còn {{ i.remaining|vnd }}{% else %}○ chưa đến hạn · còn {{ i.remaining|vnd }}{% endif %}</td>
+{% if can_plan %}<td><form method="post" action="{% url 'money_cancel_installment' i.installment.pk %}" class="row-form">{% csrf_token %}<input type="hidden" name="cong_trinh" value="{{ b.project.pk }}"><label>Lý do huỷ <input type="text" name="ly_do" required></label><button class="btn plain" type="submit">Huỷ đợt</button></form></td>{% endif %}</tr>{% endfor %}
+</tbody></table></div>
+{% if b.plan.plan_gap is not None %}<p class="missing">⚠ Tổng các đợt {{ b.plan.planned|vnd }} khác giá trị hợp đồng (chênh {{ b.plan.plan_gap|vnd }}).</p>{% endif %}
+{% if b.plan.ahead > 0 %}<p>Thu vượt lịch đợt: {{ b.plan.ahead|vnd }}</p>{% endif %}
+{% else %}<p class="missing">? Chưa có lịch đợt thanh toán: trợ lý chưa nhắc được khách nào đến hạn.</p>{% endif %}
+{% if can_plan %}<details class="box"><summary><b>Thêm đợt thanh toán</b></summary><form method="post" action="{% url 'money_add_installment' %}" class="row-form">{% csrf_token %}<input type="hidden" name="cong_trinh" value="{{ b.project.pk }}">
+<label>Tên đợt <input type="text" name="ten" required placeholder="vd Đợt 3 – xong phần thô"></label>
+<label>Số tiền (₫) <input type="text" name="so_tien" inputmode="numeric" required placeholder="vd 300.000.000"></label>
+<label>Hạn <input type="date" name="han" required></label>
+<label>Ghi chú <input type="text" name="ghi_chu" placeholder="vd theo phụ lục 2"></label>
+<button class="btn" type="submit">Thêm đợt</button></form></details>{% endif %}
+{% endif %}
 </section>{% empty %}<p class="missing">Chưa được giao công trình nào.</p>{% endfor %}
 {% endblock %}

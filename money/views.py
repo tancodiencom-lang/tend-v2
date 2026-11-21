@@ -12,14 +12,15 @@ from django.db.models import Q
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_http_methods
+from django.urls import reverse
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from core.text import fold
+from core.text import fold, number
 from overview.compute import customer, payables
 from projects.models import projects_for
 
-from . import misa, services
-from .models import ACCRUALS, RECEIPTS, Entry, Kind, Party
+from . import aging, misa, services
+from .models import ACCRUALS, RECEIPTS, Entry, Installment, Kind, Party
 
 ZERO = Decimal(0)
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -114,14 +115,24 @@ def ledger(request):
 def debts(request):
     _money_user(request)
     user = request.user
+    today = timezone.localdate()
     blocks = []
     for project in projects_for(user).filter(active=True).order_by("code"):
         block = {"project": project}
         if user.sees_payables:
             block["pay"] = payables(project)
+            block["aging"] = [dict(r, label=aging.label(r)) for r in aging.payables([project], today)["rows"]]
+            block["aging_open"] = any(r["status"] in ("qua_han", "sap_han") for r in block["aging"])
         if user.sees_receivables:
             block["customer"] = customer(project)
+            block["plan"] = next(iter(aging.receivables([project], today)), None)
         blocks.append(block)
+    if request.GET.get("tai") == "tuoi-no" and user.sees_payables:
+        rows = [[b["project"].code, r["group"], r["name"], r["entry"].number or f"#{r['entry'].pk}",
+                 f"{r['entry'].date:%d/%m/%Y}", float(r["remaining"]), f"{r['due']:%d/%m/%Y}" if r["due"] else "chưa có",
+                 r["label"]] for b in blocks for r in b["aging"]]
+        return _xlsx(f"tuoi-no-{today:%Y%m%d}.xlsx", f"Tuổi nợ phải trả ngày {today:%d/%m/%Y}",
+                     ["Công trình", "Nhóm", "Đối tượng", "Số phiếu", "Ngày phiếu", "Còn nợ (₫)", "Hạn trả", "Tình trạng"], rows, (5,))
     if request.GET.get("tai") == "xlsx":
         rows = []
         for b in blocks:
@@ -138,7 +149,62 @@ def debts(request):
                 rows.append([code, "Khách hàng", b["project"].name, float(c["contract"]), float(c["received"]), float(c["remaining"])])
         return _xlsx(f"cong-no-{timezone.localdate():%Y%m%d}.xlsx", f"Công nợ ngày {timezone.localdate():%d/%m/%Y}",
                      ["Công trình", "Nhóm", "Đối tượng", "Phát sinh / hợp đồng (₫)", "Đã trả / đã thu (₫)", "Còn (₫)"], rows, (3, 4, 5))
-    return render(request, "money/debts.html", {"blocks": blocks})
+    return render(request, "money/debts.html", {"blocks": blocks, "can_set_due": services.can_set_due(user),
+                                                "can_plan": services.can_plan_receivables(user), "today": today})
+
+
+def _back(request, message, ok=True):
+    (messages.success if ok else messages.error)(request, message)
+    return redirect(reverse("money_debts") + (f"#ct-{request.POST.get('cong_trinh')}" if request.POST.get("cong_trinh") else ""))
+
+
+@login_required
+@require_POST
+def set_due(request, pk):
+    """Đặt / đổi hạn trả một khoản nhận hàng, khoán (Giám đốc, kế toán nội bộ)."""
+    if not services.can_set_due(request.user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán nội bộ đặt hạn trả.")
+    entry = get_object_or_404(Entry, pk=pk, project__in=projects_for(request.user))
+    raw = request.POST.get("han", "").strip()
+    if not raw:
+        return _back(request, "Chọn ngày hạn trả.", ok=False)
+    try:
+        services.set_due(request.user, entry, raw, request.POST.get("ly_do", ""), channel="web")
+    except (ValidationError, ValueError) as error:
+        return _back(request, "; ".join(getattr(error, "messages", [str(error)])), ok=False)
+    return _back(request, f"Đã đặt hạn trả {entry.number or '#' + str(entry.pk)}: {date.fromisoformat(raw):%d/%m/%Y}.")
+
+
+@login_required
+@require_POST
+def add_installment(request):
+    """Thêm đợt thanh toán của khách (Giám đốc, kế toán tài chính)."""
+    if not services.can_plan_receivables(request.user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán tài chính nhập đợt thanh toán của khách.")
+    project = get_object_or_404(projects_for(request.user), pk=request.POST.get("cong_trinh") or 0)
+    amount = number(request.POST.get("so_tien", ""))
+    raw = request.POST.get("han", "").strip()
+    if amount is None or not raw:
+        return _back(request, "Ghi số tiền và hạn của đợt.", ok=False)
+    try:
+        inst = services.add_installment(request.user, project, request.POST.get("ten", ""), amount, raw,
+                                        request.POST.get("ghi_chu", ""), channel="web")
+    except (ValidationError, ValueError) as error:
+        return _back(request, "; ".join(getattr(error, "messages", [str(error)])), ok=False)
+    return _back(request, f"Đã thêm {inst.name} ({project.code}).")
+
+
+@login_required
+@require_POST
+def cancel_installment(request, pk):
+    if not services.can_plan_receivables(request.user):
+        raise PermissionDenied("Chỉ Giám đốc và kế toán tài chính huỷ đợt thanh toán của khách.")
+    inst = get_object_or_404(Installment, pk=pk, project__in=projects_for(request.user))
+    try:
+        services.cancel_installment(request.user, inst, request.POST.get("ly_do", ""), channel="web")
+    except ValidationError as error:
+        return _back(request, "; ".join(error.messages), ok=False)
+    return _back(request, f"Đã huỷ {inst.name} ({inst.project.code}).")
 
 
 @login_required
@@ -198,6 +264,11 @@ def parties(request):
         try:
             if request.POST.get("id"):
                 party = get_object_or_404(Party, pk=request.POST["id"])
+                if "terms_days" in request.POST and services.can_set_due(user):     # số ngày được nợ: kế toán nội bộ, Giám đốc
+                    raw = request.POST["terms_days"].strip()
+                    if raw and not (raw.isdigit() and int(raw) <= 365):
+                        raise ValidationError("Số ngày được nợ từ 0 đến 365 (để trống = chưa có).")
+                    fields["terms_days"] = int(raw) if raw else None
                 services.set_party(user, party, type=type_ if type_ in Party.Type.values else party.type,
                                    active=request.POST.get("active") == "1", **fields)
             else:
@@ -215,7 +286,8 @@ def parties(request):
         rows = [p for p in rows if fold(query) in fold(p.name)]
     data = [{"party": p, "in": totals[p.pk]["in"], "out": totals[p.pk]["out"], "debt": totals[p.pk]["in"] - totals[p.pk]["out"]}
             for p in rows]
-    return render(request, "money/parties.html", {"rows": data, "can_edit": can_edit, "types": Party.Type.choices, "query": query})
+    return render(request, "money/parties.html", {"rows": data, "can_edit": can_edit, "types": Party.Type.choices, "query": query,
+                                                  "can_terms": services.can_set_due(user)})
 
 
 @login_required

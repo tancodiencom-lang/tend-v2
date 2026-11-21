@@ -5,6 +5,8 @@ Giờ (ngày làm việc TEND_WORK_DAYS, mặc định thứ Hai–thứ Bảy):
     07:30  bản tin sáng cho Giám đốc; việc hôm nay cho từng người
     16:00  nhắc giám sát công trình chưa có báo cáo ngày; 17:00 nhắc lần hai; 19:00 báo Giám đốc
     18:00  nhắc người nhập phiếu chi trong ngày còn thiếu ảnh chứng từ
+    thứ Tư 08:30 báo cáo công nợ khách + dòng tiền (kế toán tài chính, Giám đốc); thứ Sáu 08:30 công nợ phải trả (kế toán
+           nội bộ, Giám đốc) — money/weekly.py
     18:30  tóm tắt ngày cho Giám đốc (tiến độ, nhân công, thu chi, việc còn mở)
     liên tục trong giờ: nhắc việc sắp đến hạn/quá hạn, leo thang lên Giám đốc, cảnh báo Gấp (mỗi tuần một lần mỗi loại)
 Nhân viên chỉ nhận tin 07:00–19:30 ngày làm việc; Giám đốc 07:00–21:30.
@@ -356,6 +358,21 @@ def send_group(key, group, text, now=None):
     return True
 
 
+def weekly_money(local, go):
+    """Trợ lý kế toán — báo cáo công nợ tuần (chủ dự án chốt 21/11/2026): thứ Sáu 08:30 phải trả (kế toán nội bộ + Giám
+    đốc), thứ Tư 08:30 phải thu và dòng tiền (kế toán tài chính + Giám đốc). Mỗi người nhận bản tính theo quyền của mình."""
+    from money import weekly
+    plan = {5: (Role.INTERNAL_ACCOUNTANT, weekly.internal_text, "ktnb"), 3: (Role.FINANCE_ACCOUNTANT, weekly.finance_text, "kttc")}
+    if local.isoweekday() not in plan or not window(local, 8, 30) or not is_workday(local):
+        return
+    role, build, tag = plan[local.isoweekday()]
+    year, week, _ = local.isocalendar()
+    for user in weekly.recipients(role):
+        key = f"weekly-{tag}:{year}-{week}:{user.pk}"
+        if not sent(key):
+            go(key, user, build(user, local.date()))
+
+
 def marketing_run(now, local, stamp, done):
     """Trợ lý nội dung: gom ảnh mới mỗi lượt; 08:00 (mọi ngày, kể cả Chủ nhật) soạn bài nháp hằng ngày và gửi người duyệt;
     nhắc bài chờ duyệt quá 6 giờ (một lần mỗi bài, 07:00–21:30). Lỗi ở đây không làm hỏng các việc khác của trợ lý."""
@@ -403,6 +420,7 @@ def run(now=None):
             cache["alerts"] = alerts(today)
         return cache["alerts"]
 
+    weekly_money(local, go)
     if window(local, 7, 30) and is_workday(local):
         for user in directors():
             if not sent(f"morning:{stamp}:{user.pk}"):

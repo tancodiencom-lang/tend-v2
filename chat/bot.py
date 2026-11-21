@@ -25,6 +25,7 @@ from assistant.models import Feedback
 from core.audit import record_save
 from core.models import User
 from core import secretscan
+from chat import desks
 from core.text import phone as phone_digits
 from core.text import vn_number
 from drawings.models import Item
@@ -39,7 +40,7 @@ from money import services as money
 
 from marketing import bot as marketing_bot
 
-from . import ai, group_bot, money_bot, parse, reads, task_bot, telegram
+from . import ai, debt_bot, group_bot, money_bot, parse, reads, task_bot, telegram
 from .models import ChatLink, ChatPhoto, ChatUpdate, GroupViewer, LinkCode, Proposal
 
 CODE_TTL = timedelta(minutes=15)
@@ -58,7 +59,9 @@ HELP = ("Tend qua Telegram:\n"
         "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup\n"
         "• Kế toán: chụp ảnh phiếu hoặc nhắn \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng\" (loại: thu khách, thu khác, "
         "nhận hàng, khoán, trả NCC, trả tổ, trả lương, chi). Tra cứu: /thuchi hôm nay|tuần|tháng, /congno [TN-22], /baocao tuần|tháng, "
-        "/doituong <tên>. Huỷ: /huy PC12 lý do.\n" + task_bot.HELP + "\n" + marketing_bot.HELP)
+        "/doituong <tên>. Huỷ: /huy PC12 lý do.\n" + debt_bot.HELP + "\n" + task_bot.HELP + "\n" + marketing_bot.HELP + "\n"
+        "• Gọi trợ lý để làm việc liền một việc (ảnh, tin không bị hiểu sang việc khác): @mkt, @ketoannoibo, @ketoantaichinh, "
+        "@giamsat, @troly; @dong để đóng (tự đóng sau 3 giờ không nhắn).")
 
 
 # ---------- kết nối ----------
@@ -407,6 +410,8 @@ def summary(proposal):
         return task_bot.summary(proposal)
     if proposal.kind == Proposal.Kind.MONEY:
         return money_bot.summary(proposal)
+    if proposal.kind == Proposal.Kind.DEBT:
+        return debt_bot.summary(proposal)
     if proposal.kind == Proposal.Kind.VOID:
         return money_bot.void_summary(proposal) + "\nBấm Xác nhận để huỷ phiếu này."
     p = proposal.payload
@@ -913,6 +918,8 @@ def decide(link_row, proposal_id, confirm):
                 result = money_bot.confirm(proposal, user)
             elif proposal.kind == Proposal.Kind.TASK:
                 result = task_bot.confirm(proposal, user)
+            elif proposal.kind == Proposal.Kind.DEBT:
+                result = debt_bot.confirm(proposal, user)
             elif proposal.kind == Proposal.Kind.VOID:
                 if p.get("needs_director"):
                     raise PermissionDenied("Phiếu này cần Giám đốc duyệt huỷ.")
@@ -1007,9 +1014,10 @@ def _remember(link_row, text, answer):
     _state(link_row, history=history)
 
 
-def handle_text(link_row, text, group=None, passive=False, message_id=None):
+def handle_text(link_row, text, group=None, passive=False, message_id=None, desk=None):
     """Trả (chữ trả lời, phiếu hoặc None). `group`: tin trong nhóm (trả lời không có tiền, phiếu gửi riêng);
-    `passive`: tin trong nhóm không gọi trợ lý — chỉ lập phiếu khi rõ là báo cáo/phiếu, còn lại im lặng."""
+    `passive`: tin trong nhóm không gọi trợ lý — chỉ lập phiếu khi rõ là báo cáo/phiếu, còn lại im lặng.
+    `desk`: trợ lý đang được gọi trong chat riêng (chat/desks.py) — chỉ làm việc của trợ lý đó."""
     user = link_row.user
     command = text.split()[0].casefold() if text.split() else ""
     if command in ("/trogiup", "/help", "/start"):
@@ -1039,6 +1047,8 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
         return "Đã ngắt kết nối Telegram với Tend.", None
     if command == "/congno":
         return reads.debts_text(user, text.split()[1] if len(text.split()) > 1 else None), None
+    if command in debt_bot.COMMANDS:
+        return debt_bot.handle(link_row, command, text)
     if command in ("/thuchi", "/baocao"):
         arg = " ".join(text.split()[1:])
         span = parse.period(arg or ("" if command == "/thuchi" else "tuần"))
@@ -1087,6 +1097,8 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
             ask_id = state["answer_to"]
             _state(link_row, answer_to=None)
             return None, build_answer(link_row, ask_id, text, text)
+    if desk is not None and desk.key == "mkt" and group is None and not text.startswith("/"):
+        return marketing_bot.desk_text(link_row, text), None
     where = f"nhóm \"{group.title}\"" if group else "tin nhắn riêng"
     reply_chat = group.chat_id if group else link_row.chat_id
     project = group.project if group else None
@@ -1116,9 +1128,13 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
                         + ". Cả nhóm đọc câu trả lời: KHÔNG nêu số tiền, giá, công nợ, lãi; hỏi về tiền thì trả lời \"Phần tiền "
                           "anh/chị hỏi riêng em nhé\". Phiếu báo cáo sẽ gửi riêng người nhắn xác nhận."
                         + (" Tin này KHÔNG gọi trợ lý: chỉ lập phiếu nếu rõ ràng là báo cáo/chấm công; còn lại trả lời rỗng." if passive else ""))
+        tools = ai.group_tools() if group is not None else None
+        if desk is not None and group is None:
+            context += desks.ai_context(desk)
+            tools = [tool for tool in ai.TOOLS if desk.tools is None or tool["name"] in desk.tools]
         history = [] if group is not None else list(state.get("history") or [])
         result = ai.run(text, history, context, lambda name, data: reads.execute(viewer, name, data), images=images,
-                        tools=ai.group_tools() if group is not None else None)
+                        tools=tools)
         if result is not None:
             if result["type"] == "text":
                 if passive:
@@ -1146,9 +1162,15 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None):
             if result["tool"] == "propose_task":
                 return None, task_bot.build(link_row, data, text)
             return None, build_report(link_row, {**data, "via": "ai"}, text)
-    data = parse.money(text, reads.projects(user))
+    data = parse.money(text, reads.projects(user)) if desk is None or desk.key in desks.MONEY else None
     if data:
         return None, money_bot.build(link_row, data, text)
+    if desk is not None and desk.key != "giamsat":
+        hint = ("nhắn theo mẫu \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng\" (thu khách, thu khác, nhận hàng, khoán, trả "
+                "NCC, trả tổ, trả lương, chi)" if desk.key in desks.MONEY else "dùng lệnh /tongquan, /viec, /giao, /hoi")
+        task_bot.friction(user, text, f"bot không hiểu tin nhắn ({desk.name})", topic=Feedback.Topic.NOT_UNDERSTOOD)
+        return (f"{desk.label} chưa hiểu tin này" + ("" if ai.available() else " (trợ lý AI chưa bật)") + f": {hint}. "
+                "Việc khác gọi trợ lý khác: @giamsat, @ketoannoibo, @mkt, @troly; @dong để đóng."), None
     projects = reads.projects(user)
     data = parse.report(text, projects, codes=item_codes, strict=passive)
     if data and data.get("needs_project") and project is not None:      # nhóm của một công trình: báo cáo của công trình đó
@@ -1236,8 +1258,12 @@ def _sender(message):
     return str(person.get("id") or ""), name
 
 
+def _best_size(sizes):
+    return max(sizes, key=lambda p: (p.get("file_size") or 0, p.get("width") or 0))
+
+
 def _save_photo(link_row, sizes, caption=""):
-    best = max(sizes, key=lambda p: (p.get("file_size") or 0, p.get("width") or 0))
+    best = _best_size(sizes)
     if link_row.photos.filter(file_unique_id=best.get("file_unique_id", "")).exists():
         return True
     got = telegram.download(best["file_id"])
@@ -1324,6 +1350,10 @@ def handle_message(message):
         return
     if link_row.chat_id != chat_id:
         ChatLink.objects.filter(pk=link_row.pk).update(chat_id=chat_id)
+    desk = _desk_step(link_row, chat_id, text, bool(message.get("photo") or message.get("document")))
+    if desk is False:
+        return
+    desk, text = desk
     sizes = message.get("photo")
     document = message.get("document") or {}
     if not sizes and document:
@@ -1337,16 +1367,36 @@ def handle_message(message):
         if not photo:
             telegram.send(chat_id, "Không nhận được ảnh (quá 15 MB, không phải ảnh, hoặc lỗi mạng). Gửi lại giúp.")
             return
+        # Gửi lại đúng tệp đã gửi trước (Telegram giữ nguyên mã tệp): báo cáo không ghi trùng, nhưng bài đăng vẫn dùng bản
+        # đã lưu (chủ dự án 21/11/2026: gửi lại ảnh 3 lần mà bài vẫn "không có ảnh").
+        link_row.incoming_photo = (photo if photo is not True else link_row.photos.filter(
+            file_unique_id=_best_size(sizes).get("file_unique_id", "")).order_by("-pk").first())
         replied = message.get("reply_to_message") or {}
         draft = (marketing_bot.PREVIEW.search(replied.get("text") or replied.get("caption") or "")
                  if (replied.get("from") or {}).get("is_bot") else None)
-        if draft and photo is not True:                  # trả lời bản nháp bài đăng bằng ảnh = thêm ảnh vào bài đó
-            answer = marketing_bot.reply_photo(link_row, int(draft.group(1)), photo, message.get("media_group_id") or "")
+        if draft and link_row.incoming_photo is not None:   # trả lời bản nháp bài đăng bằng ảnh = thêm ảnh vào bài đó
+            answer = marketing_bot.reply_photo(link_row, int(draft.group(1)), link_row.incoming_photo,
+                                               message.get("media_group_id") or "")
             if answer:
                 telegram.send(chat_id, answer)
             return
         group = message.get("media_group_id") or ""
-        if photo is not True and photo.target.startswith("code:"):
+        if desk is not None and desk.key == "mkt" and link_row.incoming_photo is not None:   # ảnh ở bàn Marketing = ảnh bài
+            answer = marketing_bot.desk_photo(link_row, link_row.incoming_photo, group, text)
+            if answer:
+                telegram.send(chat_id, answer)
+            return
+        if desk is not None and desk.key in desks.MONEY and not text:       # ảnh ở bàn Kế toán = chứng từ, không phải báo cáo
+            if not group or (link_row.state or {}).get("last_group") != group:
+                _state(link_row, last_group=group)
+                telegram.send(chat_id, f"{desk.icon} Đã nhận ảnh chứng từ. Nhắn nội dung phiếu (vd \"trả NCC 5tr Cát Hùng Vương TN-22 "
+                                       "ck\") hoặc nhắn \"đọc ảnh\" để trợ lý tự đọc phiếu trong ảnh.")
+            return
+        if desk is not None and desk.key == "troly" and not text:
+            telegram.send(chat_id, f"{desk.icon} Trợ lý Giám đốc không nhận ảnh. Ảnh báo cáo gọi @giamsat, ảnh phiếu gọi @ketoannoibo, "
+                                   "ảnh bài đăng gọi @mkt.")
+            return
+        if photo is not True and photo.target.startswith("code:") and (desk is None or desk.key == "giamsat"):
             proposal = attach_tagged_photo(link_row, photo)
             if proposal is not None:
                 _proposal_reply(chat_id, proposal)
@@ -1373,7 +1423,7 @@ def handle_message(message):
             telegram.send(chat_id, answer)
         return
     try:
-        answer, proposal = handle_text(link_row, text)
+        answer, proposal = handle_text(link_row, text, desk=desk)
     except (ValidationError, PermissionDenied, ValueError) as error:
         telegram.send(chat_id, _error_text(error))
         return
@@ -1382,7 +1432,45 @@ def handle_message(message):
             _state(link_row, album={"group": message["media_group_id"], "proposal": str(proposal.pk)})
         _proposal_reply(chat_id, proposal)
     elif answer:
-        telegram.send(chat_id, answer)
+        telegram.send(chat_id, answer if desk is None or desk.key == "mkt" or answer.startswith(desk.icon)
+                      else f"{desk.icon} {answer}")
+
+
+def _desk_step(link_row, chat_id, text, has_photo):
+    """Gọi/đóng trợ lý ("@mkt", "@ketoannoibo", "@dong") và bàn đang làm việc (tự đóng khi lâu không nhắn).
+    → False nếu tin chỉ để gọi/đóng (đã trả lời), hoặc (bàn hoặc None, chữ còn lại để xử lý)."""
+    user = link_row.user
+    desk, expired = desks.current(link_row)
+    if expired is not None:
+        _state(link_row, desk=None, desk_at=None)
+        telegram.send(chat_id, f"⏱ {expired.label} đã tự đóng sau {desks.idle_hours():g} giờ không nhắn"
+                      + (f"; anh/chị đang ở {desk.label}." if desk else "; tin này bot tự nhận biết như bình thường."))
+    call, rest = desks.parse_call(text)
+    if call is None:
+        if (link_row.state or {}).get("desk"):
+            _state(link_row, desk_at=timezone.now().isoformat())
+        return desk, text
+    if call == "?":
+        telegram.send(chat_id, "Chưa có trợ lý tên đó.\n" + desks.menu(user))
+        return False
+    if call == "dong":
+        closing = desks.BY_KEY.get((link_row.state or {}).get("desk"))
+        _state(link_row, desk=None, desk_at=None)
+        fallback = desks.BY_KEY.get(desks.default_for(user))
+        telegram.send(chat_id, (f"Đã đóng {closing.label}. " if closing else "Chưa gọi trợ lý nào. ")
+                      + (f"Anh/chị đang ở {fallback.label} (bàn mặc định của vai)." if fallback
+                         else "Tin nhắn từ giờ bot tự nhận biết như bình thường.") + "\n" + desks.menu(user))
+        return False
+    target = desks.BY_KEY[call]
+    if not target.allows(user):
+        telegram.send(chat_id, f"{target.label} chưa dành cho vai của anh/chị.\n" + desks.menu(user))
+        return False
+    _state(link_row, desk=call, desk_at=timezone.now().isoformat())
+    if not rest or has_photo:
+        telegram.send(chat_id, desks.welcome(target, user))
+    if not rest and not has_photo:
+        return False
+    return target, rest
 
 
 def handle_callback(callback):

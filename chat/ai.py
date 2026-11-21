@@ -51,8 +51,10 @@ Việc của bạn:
    phiếu một dòng: kind (thu_khach thu tiền khách; thu_khac thu khác; hang_ncc hàng nhà cung cấp đã nhận, chưa trả;
    tra_ncc trả nhà cung cấp; khoan_tinh giá trị khoán tổ thợ được tính; tra_to trả tổ thợ; tra_cong trả lương công
    nhật; chi_khac chi khác), số phiếu, ngày, đối tượng (tên NCC/tổ/khách/người nhận đúng như trên phiếu), công trình
-   (mã), nội dung, số tiền (số nguyên đồng), tiền mặt hay chuyển khoản, photo_index (ảnh số mấy, nếu có ảnh). Chỉ ghi
-   số đọc rõ trên ảnh/tin; không đọc được số tiền thì ask_user. Huỷ phiếu đã ghi: propose_void (số phiếu + lý do).
+   (mã), nội dung, số tiền (số nguyên đồng), tiền mặt hay chuyển khoản, photo_index (ảnh số mấy, nếu có ảnh), due_date
+   (hạn trả, chỉ hang_ncc/khoan_tinh khi ghi rõ). Chỉ ghi số đọc rõ trên ảnh/tin; không đọc được số tiền thì ask_user.
+   Huỷ phiếu đã ghi: propose_void (số phiếu + lý do). Đặt hạn trả cho phiếu ĐÃ GHI, số ngày được nợ của NCC/tổ, đợt
+   thanh toán của khách: không lập phiếu, chỉ cách dùng lệnh /hantra, /hanno, /dotthu hoặc trang Công nợ.
 6. CHỈ ĐẠO GIAO VIỆC của Giám đốc (vd "nhắc Nam gửi bản vẽ điện TN-22 trước thứ Sáu", "bảo kế toán đối chiếu công nợ Cát
    Hùng Vương mai"): gọi find_people lấy đúng người, rồi propose_task: owner_name đúng tên đăng nhập từ find_people, title
    ngắn gọn bắt đầu bằng động từ, due_date YYYY-MM-DD và due_time HH:MM (không nói giờ thì 17:00; "trước thứ Sáu" là thứ
@@ -63,7 +65,7 @@ Việc của bạn:
    của người không phải Giám đốc: gọi ask_director với câu hỏi viết rõ (ai hỏi, về việc gì) và bản nháp trả lời nếu có
    căn cứ. Không tự hứa, không đoán.
 8. Yêu cầu VIẾT hoặc SỬA BÀI ĐĂNG Facebook/nội dung: bạn không soạn, không lưu, không đăng bài; KHÔNG viết bài vào tin trả
-   lời và không nói "đã lưu". Trả lời ngắn: giao bài mới bằng /baiviet <yêu cầu> (gửi ảnh trước nếu có); sửa bài nháp thì
+   lời và không nói "đã lưu". Trả lời ngắn: gõ @mkt để làm việc với Trợ lý Marketing, hoặc /baiviet <yêu cầu>; sửa bài nháp thì
    trả lời (reply) vào tin "BÀI NHÁP #…" kèm ý muốn sửa, hoặc bấm ✍ Sửa chữ.
 9. Không bịa số liệu, không tự đoán phần trăm. Thiếu công trình thì hỏi lại (trừ khi người dùng chỉ có một công trình).
 Trả lời ngắn, tối đa khoảng 12 dòng. Không dùng Markdown phức tạp."""
@@ -149,7 +151,9 @@ TOOLS = [
              "project_code": {"type": "string"}, "date": {"type": "string", "description": "YYYY-MM-DD"},
              "number": {"type": "string"}, "party": {"type": "string"}, "content": {"type": "string"},
              "amount": {"type": "integer"}, "method": {"type": "string", "enum": ["tien_mat", "chuyen_khoan"]},
-             "photo_index": {"type": "integer"}}}}}}},
+             "photo_index": {"type": "integer"},
+             "due_date": {"type": "string", "description": "YYYY-MM-DD: hạn trả, chỉ cho hang_ncc / khoan_tinh khi tin hoặc "
+                                                           "chứng từ ghi rõ hạn"}}}}}}},
     {"name": "propose_void", "description": "Xin huỷ một phiếu đã ghi (số phiếu hoặc #mã) kèm lý do.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["ref", "reason"],
                       "properties": {"ref": {"type": "string"}, "reason": {"type": "string"}}}},

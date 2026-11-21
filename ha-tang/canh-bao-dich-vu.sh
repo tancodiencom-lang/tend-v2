@@ -11,7 +11,7 @@ case "$UNIT" in
   tend-v2.service) WHAT="APP TEND MỚI bị dừng do lỗi (hệ thống tự khởi động lại; báo lại nhiều lần thì cần kiểm tra)." ;;
   *) WHAT="Dịch vụ $UNIT bị lỗi." ;;
 esac
-LOG=$(journalctl -u "$UNIT" -n 8 --no-pager -o cat 2>/dev/null | cut -c1-200)
+LOG=$(journalctl -u "$UNIT" -n 12 --no-pager -o cat 2>/dev/null | cut -c1-300)
 MSG="⚠️ app.tend.vn – $(date '+%d/%m/%Y %H:%M')
 $WHAT
 

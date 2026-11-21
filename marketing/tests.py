@@ -715,12 +715,110 @@ class DeepWritingTests(MarketingCase):
             jobs._spawn_if_idle()
         self.assertIn("viet_bai", popen.call_args[0][0])
 
+    def test_photo_sent_again_same_telegram_file_is_still_used(self):
+        """Chủ dự án 21/11/2026: gửi lại đúng tấm ảnh (Telegram giữ nguyên mã tệp) 3 lần mà bài vẫn "không có ảnh"."""
+        self.message(self.mkt, "", photo="cung-tep")                                   # lần đầu: ảnh lẻ (rơi vào luồng báo cáo)
+        Post.objects.all().delete()
+        from chat.models import ChatPhoto as Photo_
+        Photo_.objects.filter(file_unique_id="cung-tep").update(received_at=timezone.now() - timedelta(hours=2), target="noi-dung")
+        self.message(self.mkt, "/baiviet dầm tum thang máy", photo="cung-tep")         # gửi lại đúng tệp kèm lệnh
+        post = Post.objects.get()
+        self.assertEqual(post.items.count(), 1)
+        self.assertEqual(Photo_.objects.filter(file_unique_id="cung-tep").count(), 1)  # không lưu trùng ảnh
+        draft = services.create_post(self.mkt, "Bài thử thêm ảnh", [], timezone.localdate())
+        msg = {"message_id": 902, "chat": {"id": int(self.chats[self.mkt.pk]), "type": "private"},
+               "from": {"id": self.mkt.pk + 9000, "first_name": "mkt"},
+               "photo": [{"file_id": "cung-tep", "file_unique_id": "cung-tep", "file_size": 100, "width": 8}],
+               "reply_to_message": {"message_id": 6, "from": {"id": 1, "is_bot": True}, "text": PREFIX_ANCHOR(draft)}}
+        from chat import bot as chat_bot
+        chat_bot.handle_update({"update_id": next(self.update_id), "message": msg})    # trả lời bản nháp bằng ảnh đã gửi
+        draft.refresh_from_db()
+        self.assertEqual(draft.items.count(), 1)
+
     def test_facebook_errors_in_vietnamese(self):
         text = facebook.vietnamese(190, 463, "Error validating access token: Session has expired on Friday, 20-Nov-26 00:00:00 "
                                              "PST. The current time is Saturday, 21-Nov-26 00:28:02 PST.")
         self.assertIn("Khoá Facebook đã hết hạn lúc 15:00 20/11/2026 (giờ Việt Nam)", text)
         self.assertIn("không đúng dạng", facebook.vietnamese(190, None, "Invalid OAuth access token - Cannot parse access token"))
         self.assertIn("thiếu quyền", facebook.vietnamese(200, None, "Permissions error"))
+
+
+class DeskTests(MarketingCase):
+    """Chủ dự án 21/11/2026: một bot; gọi @mkt thì trợ lý Marketing làm việc với mình, gọi @ketoannoibo thì từ đó trao đổi
+    với kế toán nội bộ; xong thì đóng lại — ảnh, tin không lẫn sang báo cáo hiện trường."""
+
+    def last(self, user):
+        return self.texts(self.chats[user.pk])[-1]
+
+    def test_director_works_with_marketing_desk_then_closes(self):
+        self.message(self.director, "@mkt")
+        self.assertIn("📣 Trợ lý Marketing đang làm việc", self.last(self.director))
+        self.message(self.director, "", photo="ban1")                                    # ảnh ở bàn: để dành cho bài sắp viết
+        self.assertIn("Đã nhận ảnh cho bài sắp viết (1 ảnh)", self.last(self.director))
+        self.assertFalse(Proposal.objects.exists())                                       # không thành phiếu báo cáo
+        self.message(self.director, "dầm tum thang máy hay bị bỏ sót khi cải tạo nhà")    # chủ đề → bài mới kèm ảnh để dành
+        post = Post.objects.get()
+        self.assertEqual(post.items.count(), 1)
+        self.message(self.director, "", photo="ban2")                                    # ảnh tiếp → thêm vào bài đang làm
+        post.refresh_from_db()
+        self.assertEqual(post.items.count(), 2)
+        self.assertIn(f"BÀI NHÁP #{post.pk}", self.last(self.director))
+        captured = []
+        with mock.patch.object(ai, "available", return_value=True), \
+                mock.patch.object(ai, "create_message", side_effect=PageVoiceTests.ai_reply(captured, {"text": "Bài ngắn hơn"})):
+            self.message(self.director, "viết lại cho ngắn hơn")                          # ý sửa rõ → sửa bài đang làm
+        post.refresh_from_db()
+        self.assertEqual(post.text, "Bài ngắn hơn")
+        self.message(self.director, "sửa chữa nhà cũ cần lưu ý gì")                       # chưa rõ → hỏi bằng 2 nút
+        buttons = self.last_buttons(self.chats[self.director.pk])
+        self.assertEqual(buttons["📝 Viết bài mới về chủ đề này"], "mk:dn:0")
+        self.press(self.director, "mk:dn:0")
+        self.assertEqual(Post.objects.count(), 2)
+        self.assertIn("sửa chữa nhà cũ", Post.objects.order_by("-pk").first().idea.text)
+        self.message(self.director, "@đóng")
+        self.assertIn("Đã đóng 📣 Trợ lý Marketing", self.last(self.director))
+        self.message(self.director, "", photo="ban3")                                    # đóng rồi: ảnh lại là ảnh báo cáo
+        self.assertIn("Nhắn nội dung báo cáo", self.last(self.director))
+
+    def test_accounting_desk_photo_is_voucher_and_report_text_not_misread(self):
+        self.message(self.director, "@kế toán nội bộ")
+        self.assertIn("💰 Trợ lý Kế toán nội bộ đang làm việc", self.last(self.director))
+        self.message(self.director, "", photo="chungtu1")
+        self.assertIn("Đã nhận ảnh chứng từ", self.last(self.director))
+        self.message(self.director, "TN-22 T1.2 40%")                                    # cú pháp báo cáo: không thành báo cáo
+        self.assertFalse(Proposal.objects.filter(kind=Proposal.Kind.REPORT).exists())
+        self.assertTrue(self.last(self.director).startswith("💰"))
+        self.assertIn("chưa hiểu tin này", self.last(self.director))
+        self.message(self.director, "trả NCC 5tr Cát Hùng Vương TN-22 ck")                 # phiếu thu chi vẫn lập như thường
+        self.assertTrue(Proposal.objects.filter(kind=Proposal.Kind.MONEY).exists())
+        captured = {}
+
+        def fake_run(text, history, context, execute, images=(), tools=None):
+            captured.update(tools=[t["name"] for t in tools or []], context=context)
+            return {"type": "text", "text": "Tuần này chi 12.000.000 ₫."}
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "run", side_effect=fake_run):
+            self.message(self.director, "tuần này chi bao nhiêu?")
+        self.assertIn("propose_entries", captured["tools"])
+        self.assertNotIn("propose_report", captured["tools"])                             # bàn kế toán không lập báo cáo
+        self.assertIn("ĐANG LÀM VIỆC VỚI TRỢ LÝ KẾ TOÁN NỘI BỘ", captured["context"])
+        self.assertEqual(self.last(self.director), "💰 Tuần này chi 12.000.000 ₫.")
+
+    def test_rights_unknown_names_idle_close_and_marketing_default(self):
+        self.message(self.site, "@ketoannoibo")
+        self.assertIn("chưa dành cho vai", self.last(self.site))
+        self.message(self.site, "@abc")
+        self.assertIn("Chưa có trợ lý tên đó", self.last(self.site))
+        self.message(self.site, "@giamsat TN-22 T1.2 40%")                                # gọi kèm tin: xử lý luôn ở bàn đó
+        self.assertTrue(Proposal.objects.filter(kind=Proposal.Kind.REPORT).exists())
+        from chat.models import ChatLink
+        row = ChatLink.objects.get(user=self.site)
+        row.state = {**row.state, "desk_at": (timezone.now() - timedelta(hours=4)).isoformat()}
+        row.save(update_fields=["state"])
+        self.message(self.site, "/tongquan")
+        self.assertTrue(any("tự đóng sau 3 giờ" in t for t in self.texts(self.chats[self.site.pk])[-2:]))
+        self.assertNotIn("desk", ChatLink.objects.get(user=self.site).state)
+        self.message(self.mkt, "", photo="mkt-mac-dinh")                                 # vai Marketing luôn ở bàn Marketing
+        self.assertIn("Đã nhận ảnh cho bài sắp viết", self.last(self.mkt))
 
 
 def PREFIX_ANCHOR(post):

@@ -17,11 +17,13 @@ from assistant.models import Feedback
 from core.audit import record_save
 from core.text import vnd
 from money import services as money
-from money.models import NEEDS_PROJECT, PARTY_TYPE, Entry, Kind, Party
+from money.models import ACCRUALS, NEEDS_PROJECT, PARTY_TYPE, Entry, Kind, Party
 from money.parties import match
 from projects.models import Project
 
 from . import reads, telegram
+from .debt_bot import due_day as debt_due_day
+from .parse import DATE as parse_date
 from .models import ChatLink, Proposal
 
 METHOD = {"tien_mat": "tiền mặt", "chuyen_khoan": "chuyển khoản", "khong": "không qua quỹ"}
@@ -72,10 +74,19 @@ def build(link_row, data, source_text):
         if not name:
             raise ValidationError(f"Dòng {index + 1}: thiếu đối tượng (NCC, tổ thợ, người nhận…).")
         method = entry.get("method") or ("khong" if kind in (Kind.SUPPLIER_GOODS, Kind.TEAM_WORK) else "tien_mat")
+        due = ""
+        if kind in ACCRUALS and (entry.get("due_date") or entry.get("due_days") is not None):
+            try:
+                raw = str(entry.get("due_date") or "")
+                due = (debt_due_day(raw, day) if parse_date.match(raw) else date.fromisoformat(raw[:10]) if raw
+                       else day + timedelta(days=int(entry["due_days"])))
+                due = money.due_date(due, day).isoformat()
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(f"Dòng {index + 1}: hạn trả không đọc được ({exc}).")
         row = {"kind": kind, "kind_label": Kind(kind).label, "project_id": project.pk if project else None,
                "project_code": project.code if project else "", "date": day.isoformat(), "number": str(entry.get("number") or "")[:40],
                "party": name[:200], "content": str(entry.get("content") or "")[:500], "amount": amount, "method": method,
-               "photo_id": None, "allow_duplicate": False, "duplicate": ""}
+               "photo_id": None, "allow_duplicate": False, "duplicate": "", "due_on": due}
         index_ = entry.get("photo_index")
         if isinstance(index_, int) and 0 <= index_ < len(photos):
             row["photo_id"] = photos[index_].pk
@@ -126,6 +137,9 @@ def summary(proposal):
         parts = [r["kind_label"], r["number"] or "chưa có số phiếu", f"{r['date'][8:10]}/{r['date'][5:7]}/{r['date'][:4]}", who,
                  r["project_code"] or ("? chưa chọn công trình" if r["kind"] in NEEDS_PROJECT else "chung công ty"),
                  METHOD.get(r["method"], r["method"]), vnd(r["amount"]), "có ảnh chứng từ" if r["photo_id"] else "không ảnh"]
+        if r["kind"] in ACCRUALS:
+            parts.append(f"hạn trả {r['due_on'][8:10]}/{r['due_on'][5:7]}/{r['due_on'][:4]}" if r.get("due_on")
+                         else "hạn trả theo số ngày được nợ của đối tượng (nếu có)")
         out.append(f"{i}. " + " · ".join(parts) + (f"\n   {r['content']}" if r["content"] else ""))
         old = money.backfill_days(date.fromisoformat(r["date"]))
         if old:
@@ -228,7 +242,7 @@ def confirm(proposal, user):
             photo.image.close()
         row = {"kind": r["kind"], "project_id": r["project_id"], "date": r["date"], "number": r["number"],
                "content": r["content"], "amount": r["amount"], "method": r["method"], "voucher": voucher,
-               "allow_duplicate": r.get("allow_duplicate"), "party": r["party"]}
+               "allow_duplicate": r.get("allow_duplicate"), "party": r["party"], "due_on": r.get("due_on") or None}
         if r["party_status"] == "new_ok":
             row["new_party"] = {"name": r["party"], "type": r["new_type"]}
         else:

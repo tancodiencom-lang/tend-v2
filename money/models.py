@@ -42,6 +42,8 @@ class Party(models.Model):
     tax_code = models.CharField("Mã số thuế", max_length=20, blank=True)
     address = models.CharField("Địa chỉ", max_length=300, blank=True)
     phone = models.CharField("Điện thoại", max_length=20, blank=True)
+    terms_days = models.PositiveSmallIntegerField("Số ngày được nợ (hạn trả mặc định)", null=True, blank=True,
+                                                  help_text="Khoản nhận hàng/khoán chưa ghi hạn thì hạn = ngày phiếu + số ngày này")
     active = models.BooleanField("Đang dùng", default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -115,6 +117,9 @@ class Entry(models.Model):
     content = models.CharField("Nội dung", max_length=500)
     amount = models.DecimalField("Số tiền (₫)", max_digits=15, decimal_places=0)
     method = models.CharField("Hình thức", max_length=12, choices=Method.choices, default=Method.CASH)
+    # Hạn trả của khoản phát sinh nợ (nhận hàng NCC, khoán tổ thợ). Trống = theo số ngày được nợ của đối tượng (nếu có).
+    # Kế toán nội bộ / Giám đốc đặt khi nhập hoặc sau (services.set_due, đổi hạn đã có phải ghi lý do, có nhật ký).
+    due_on = models.DateField("Hạn trả", null=True, blank=True)
     voucher = models.ImageField("Ảnh chứng từ", upload_to=voucher_path, blank=True)
     entered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
     client_key = models.UUIDField("Mã chống gửi trùng", unique=True)
@@ -138,3 +143,27 @@ class Entry(models.Model):
     @property
     def is_receipt(self):
         return self.kind in RECEIPTS
+
+
+class Installment(models.Model):
+    """Đợt thanh toán của khách theo hợp đồng (đợt 1, đợt 2…): số tiền + hạn. Kế toán tài chính và Giám đốc nhập (bot, web);
+    kế toán nội bộ không xem. Tiền khách đã thu trả dần vào các đợt theo thứ tự hạn (money/aging.py). Không xoá: huỷ có lý do."""
+    project = models.ForeignKey(Project, verbose_name="Công trình", on_delete=models.PROTECT, related_name="installments")
+    name = models.CharField("Tên đợt", max_length=100)
+    amount = models.DecimalField("Số tiền (₫)", max_digits=15, decimal_places=0)
+    due_on = models.DateField("Hạn thanh toán")
+    note = models.CharField("Ghi chú (điều kiện, mốc)", max_length=300, blank=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    cancelled_at = models.DateTimeField("Huỷ lúc", null=True, blank=True)
+    cancel_reason = models.CharField("Lý do huỷ", max_length=300, blank=True)
+
+    class Meta:
+        verbose_name = "Đợt thanh toán của khách"
+        verbose_name_plural = "Đợt thanh toán của khách"
+        ordering = ["project", "due_on", "pk"]
+        constraints = [models.CheckConstraint(condition=models.Q(amount__gt=0), name="installment_amount_positive")]
+
+    def __str__(self):
+        return f"{self.project.code} · {self.name}"
+
