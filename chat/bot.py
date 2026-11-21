@@ -1337,6 +1337,14 @@ def handle_message(message):
         if not photo:
             telegram.send(chat_id, "Không nhận được ảnh (quá 15 MB, không phải ảnh, hoặc lỗi mạng). Gửi lại giúp.")
             return
+        replied = message.get("reply_to_message") or {}
+        draft = (marketing_bot.PREVIEW.search(replied.get("text") or replied.get("caption") or "")
+                 if (replied.get("from") or {}).get("is_bot") else None)
+        if draft and photo is not True:                  # trả lời bản nháp bài đăng bằng ảnh = thêm ảnh vào bài đó
+            answer = marketing_bot.reply_photo(link_row, int(draft.group(1)), photo, message.get("media_group_id") or "")
+            if answer:
+                telegram.send(chat_id, answer)
+            return
         group = message.get("media_group_id") or ""
         if photo is not True and photo.target.startswith("code:"):
             proposal = attach_tagged_photo(link_row, photo)

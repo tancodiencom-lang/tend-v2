@@ -20,6 +20,7 @@ Bài không nêu tên chủ nhà, địa chỉ, giá; ảnh đăng lên đã b�
 {% if ideas %}<ul>{% for i in ideas %}<li>{{ i.get_kind_display }}: {{ i.text }}{% if i.project %} · {{ i.project.code }}{% endif %} <span class="muted">· {{ i.created_by }} {{ i.created_at|date:"d/m" }}</span>
 <form method="post" action="{% url 'marketing_idea_drop' i.pk %}" style="display:inline">{% csrf_token %}<button class="btn plain" type="submit">Bỏ</button></form></li>{% endfor %}</ul>{% endif %}
 
+{% if jobs %}<h2>Trợ lý đang viết</h2><ul>{% for j in jobs %}<li>{% if j.state == "loi" %}▼{% else %}●{% endif %} {{ j.get_kind_display }}{% if j.post_id %} bài #{{ j.post_id }}{% endif %} · {{ j.instruction|truncatechars:80 }} · {{ j.requested_by }} · {{ j.created_at|date:"d/m H:i" }} · <b>{{ j.get_state_display }}</b>{% if j.error %}: {{ j.error }}{% endif %}</li>{% endfor %}</ul>{% endif %}
 <h2>Chờ duyệt, cần xử lý ({{ waiting|length }})</h2>
 {% for p in waiting %}{% include "marketing/_card.html" %}{% empty %}<p>Không có bài chờ duyệt.</p>{% endfor %}
 {% if going %}<h2>Đã duyệt, đang đăng</h2>{% for p in going %}{% include "marketing/_card.html" %}{% endfor %}{% endif %}

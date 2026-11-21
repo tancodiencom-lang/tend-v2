@@ -106,10 +106,16 @@ class ChatPhoto(models.Model):
 
 
 class AiUsage(models.Model):
-    day = models.DateField(unique=True)
+    """Dùng AI mỗi ngày theo việc: "chat" (bot báo cáo, thu chi…) và "noi_dung" (trợ lý bài đăng) — trần chi phí riêng."""
+    day = models.DateField()
+    purpose = models.CharField(max_length=12, default="chat")
     input_tokens = models.BigIntegerField(default=0)
     output_tokens = models.BigIntegerField(default=0)
     calls = models.IntegerField(default=0)
+    cost_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["day", "purpose"], name="ai_usage_day_purpose_once")]
 
 
 class Group(models.Model):

@@ -4,6 +4,9 @@
 - AI chỉ có các "công cụ" do Tend định nghĩa: đọc số liệu chạy dưới đúng tài khoản người hỏi
   (quyền xem tiền giữ nguyên), và lập phiếu. AI **không ghi gì**; phiếu chỉ ghi khi người dùng bấm Xác nhận.
 - Trần chi phí theo tháng (TEND_AI_MONTHLY_USD); vượt trần hoặc thiếu khoá thì trả None để bot dùng lệnh không AI.
+- Trợ lý nội dung (bài đăng) dùng mô hình và trần RIÊNG (purpose "noi_dung": TEND_MKT_AI_MODEL mặc định Sonnet 5.5,
+  TEND_MKT_AI_MONTHLY_USD mặc định 30 — chủ dự án chốt 21/11/2026); hết trần nội dung không ảnh hưởng bot báo cáo.
+  Chi phí ghi theo từng lần gọi với giá đúng mô hình (AiUsage.cost_usd), không nhân tổng token với giá một mô hình.
 """
 import json
 import logging
@@ -176,20 +179,40 @@ FINAL = {'propose_report', 'propose_attendance_fix', 'propose_answer', 'propose_
 GROUP_EXCLUDED = {'money_summary', 'list_entries', 'find_parties', 'propose_entries', 'propose_void'}
 
 
-def model():
+CHAT, CONTENT = 'chat', 'noi_dung'
+
+
+def model(purpose=CHAT):
+    if purpose == CONTENT:
+        return getattr(settings, 'TEND_MKT_AI_MODEL', '') or 'claude-sonnet-5-5'
     return getattr(settings, 'TEND_AI_MODEL', 'claude-haiku-5-5')
 
 
-def month_cost(today=None):
+def cap(purpose=CHAT):
+    if purpose == CONTENT:
+        return Decimal(str(getattr(settings, 'TEND_MKT_AI_MONTHLY_USD', 30)))
+    return Decimal(str(getattr(settings, 'TEND_AI_MONTHLY_USD', 4)))
+
+
+def cost_of(usage, model_name):
+    """USD của một lần gọi: token vào/ra theo giá mô hình; ghi bộ nhớ đệm tính 1,25×, đọc bộ nhớ đệm 0,1× giá vào
+    (làm tròn lên so với giá niêm yết để không vượt trần)."""
+    price_in, price_out = PRICES.get(model_name, (Decimal(10), Decimal(50)))
+    tokens = Decimal(int(getattr(usage, 'input_tokens', 0) or 0)) * price_in
+    tokens += Decimal(int(getattr(usage, 'cache_creation_input_tokens', 0) or 0)) * price_in * Decimal('1.25')
+    tokens += Decimal(int(getattr(usage, 'cache_read_input_tokens', 0) or 0)) * price_in * Decimal('0.1')
+    tokens += Decimal(int(getattr(usage, 'output_tokens', 0) or 0)) * price_out
+    return tokens / Decimal(1_000_000)
+
+
+def month_cost(today=None, purpose=CHAT):
     today = today or timezone.localdate()
-    totals = AiUsage.objects.filter(day__year=today.year, day__month=today.month).aggregate(
-        i=Sum('input_tokens'), o=Sum('output_tokens'))
-    price_in, price_out = PRICES.get(model(), (Decimal(10), Decimal(50)))
-    return (Decimal(totals['i'] or 0) * price_in + Decimal(totals['o'] or 0) * price_out) / Decimal(1_000_000)
+    total = AiUsage.objects.filter(day__year=today.year, day__month=today.month, purpose=purpose).aggregate(c=Sum('cost_usd'))
+    return total['c'] or Decimal(0)
 
 
-def available():
-    """Có khoá AI, có thư viện và còn trong trần chi phí tháng."""
+def available(purpose=CHAT):
+    """Có khoá AI, có thư viện và còn trong trần chi phí tháng (của bot, hoặc riêng của trợ lý nội dung)."""
     import os
     if not os.environ.get('ANTHROPIC_API_KEY'):
         return False
@@ -197,21 +220,22 @@ def available():
         import anthropic  # noqa: F401
     except ImportError:
         return False
-    return month_cost() < Decimal(str(getattr(settings, 'TEND_AI_MONTHLY_USD', 4)))
+    return month_cost(purpose=purpose) < cap(purpose)
 
 
-def _record(usage):
+def _record(usage, purpose=CHAT, model_name=None):
+    cost = cost_of(usage, model_name or model(purpose))
     with transaction.atomic():
-        row, _ = AiUsage.objects.get_or_create(day=timezone.localdate())
+        row, _ = AiUsage.objects.get_or_create(day=timezone.localdate(), purpose=purpose)
         AiUsage.objects.filter(pk=row.pk).update(input_tokens=F('input_tokens') + int(getattr(usage, 'input_tokens', 0) or 0),
                                                  output_tokens=F('output_tokens') + int(getattr(usage, 'output_tokens', 0) or 0),
-                                                 calls=F('calls') + 1)
+                                                 calls=F('calls') + 1, cost_usd=F('cost_usd') + cost)
 
 
-def create_message(**kwargs):
-    """Một lần gọi Claude. Bài kiểm thay hàm này bằng bản giả."""
+def create_message(timeout=40.0, **kwargs):
+    """Một lần gọi Claude. Bài kiểm thay hàm này bằng bản giả. Bài đăng (chạy nền) chờ lâu hơn tin nhắn bot."""
     import anthropic
-    client = anthropic.Anthropic(timeout=40.0, max_retries=1)
+    client = anthropic.Anthropic(timeout=timeout, max_retries=1)
     return client.messages.create(**kwargs)
 
 
