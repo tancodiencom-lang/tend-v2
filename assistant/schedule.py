@@ -175,7 +175,7 @@ def morning_text(user, now, found=None):
     out += [f"• {task_line(t, now)}: {t.report_note or 'không ghi chú'} (bấm ✓ Nhận kết quả / ↩ Trả lại ở tin báo xong)"
             for t in waiting]
     if voids:
-        out.append(f"• {voids} phiếu thu chi xin huỷ chờ anh duyệt (nút ở tin bot đã gửi).")
+        out.append(f"• {voids} phiếu thu chi xin huỷ chờ anh duyệt (nút ở tin em đã gửi).")
     questions = list(Question.objects.filter(state=Question.State.OPEN).select_related("asked_by"))
     out += [f"• Câu hỏi #{q.pk} của {q.asked_by} ({q.where}): {q.text[:150]} (bấm ✍ Tôi trả lời ở tin trợ lý đã gửi)"
             for q in questions]
@@ -236,7 +236,7 @@ def weekly_text(user, today, now):
     week = Feedback.objects.filter(created_at__gte=now - timedelta(days=7))
     users = week.filter(kind=Feedback.Kind.USER)
     if topics or users.exists():
-        out.append(f"\nGóp ý tuần qua: {users.count()} góp ý, {week.count() - users.count()} chỗ vướng bot tự ghi.")
+        out.append(f"\nGóp ý tuần qua: {users.count()} góp ý, {week.count() - users.count()} chỗ vướng em tự ghi.")
         if topics:
             out.append("Chỗ vướng tuần trước theo loại: " + "; ".join(f"{label} {n}" for label, n in topics[:8]))
         out += [f"• {f.author}: {f.text[:150]}" for f in users[:5]]

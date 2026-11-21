@@ -52,7 +52,7 @@ def anchor_text(post):
     if post.note:
         lines.append(f"Ghi chú trợ lý: {post.note}")
     lines.append("Bấm ✓ Duyệt và đăng khi chữ, ảnh, thứ tự và Trang đều đúng. Muốn sửa: trả lời (reply) tin này kèm ý muốn sửa "
-                 "để trợ lý sửa (hoặc kèm ảnh để thêm ảnh), hoặc bấm ✍ Sửa chữ để thay nguyên văn. Sửa xong bot gửi lại bản mới.")
+                 "để trợ lý sửa (hoặc kèm ảnh để thêm ảnh), hoặc bấm ✍ Sửa chữ để thay nguyên văn. Sửa xong em gửi lại bản mới.")
     return "\n".join(lines)
 
 
@@ -149,7 +149,7 @@ def callback(link_row, data, chat_id, state_set):
             else:
                 post = services.swap_asset(user, post, index, block=op == "b")
             send_preview(post, [link_row])
-            return "✓ Đã đổi, bot gửi lại bản mới."
+            return "✓ Đã đổi, em gửi lại bản mới."
         if op == "x":
             post = services.reject(user, post, "Bỏ trên Telegram")
             return f"✓ Đã bỏ bài #{post.pk}."

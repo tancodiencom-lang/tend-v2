@@ -158,7 +158,7 @@ def _friction(proposal, topic, text):
     from .task_bot import friction
     project = Project.objects.filter(pk=next((r["project_id"] for r in proposal.payload.get("entries") or [] if r.get("project_id")),
                                              None)).first()
-    friction(proposal.link.user, text, "bot hỏi lại · phiếu thu chi", topic=topic, project=project)
+    friction(proposal.link.user, text, "em hỏi lại · phiếu thu chi", topic=topic, project=project)
 
 
 def ask(chat_id, proposal, projects):

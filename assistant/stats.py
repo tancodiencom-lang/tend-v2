@@ -100,7 +100,7 @@ def line(row):
     if row["misses"]:
         parts.append(advice(row))
     if row["asked"]:
-        parts.append(f"bot hỏi lại {row['asked']} lần")
+        parts.append(f"em hỏi lại {row['asked']} lần")
     if row["extra"]:
         parts.append(f"{row['extra']} việc ngoài bản vẽ")
     if row["dropped"]:

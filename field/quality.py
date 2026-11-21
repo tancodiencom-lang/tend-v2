@@ -76,7 +76,7 @@ def compute(coded, extra, valued, photos, named, asked, teams=0, unknown=0):
     elif unknown:
         missing.append("có số người chưa rõ tổ nào")
     if asked:
-        missing.append(f"bot phải hỏi lại {asked} lần")
+        missing.append(f"em phải hỏi lại {asked} lần")
     score.total, score.missing = int(sum(parts).quantize(Decimal(1), ROUND_HALF_UP)), missing
     return score
 

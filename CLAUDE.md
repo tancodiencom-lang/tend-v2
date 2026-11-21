@@ -24,6 +24,7 @@ Mọi màn hình chỉ trả lời 5 câu hỏi: **tiến độ hiện tại, ti
 - Mọi ghi dữ liệu nghiệp vụ qua `core.audit.record_save` / `record_delete` (ai, lúc nào, bảng, mã, trước/sau, IP, kênh, lý do) trong cùng giao dịch. Báo cáo/phiếu đã gửi không sửa: điều chỉnh là bản ghi mới có lý do.
 - Quyền kiểm ở máy chủ theo vai (`User.sees_payables/sees_receivables/sees_profit/edits_drawings`) và thành viên công trình (`projects_for`). Không chỉ ẩn nút.
 - Trạng thái luôn có ký hiệu + chữ (▲ ▼ ●), không chỉ màu. Thiếu dữ liệu thì ghi thiếu gì, không hiện 0 giả.
+- **Xưng hô** (chủ dự án 21/11/2026): trợ lý trên Telegram luôn xưng **"em"**, gọi người dùng **"anh/chị"**, không bao giờ tự gọi là "bot" (kể cả lời dặn AI `chat.ai.SYSTEM`); trang web gọi là "trợ lý (Telegram)". Bài kiểm `chat/tests_wording.py` quét mọi chuỗi chữ trong mã và trang web, chỉ cho phép vài chỗ thuần kỹ thuật (tên loại khoá "mã bot Telegram", nhật ký máy chủ, lệnh quản trị).
 
 ## Làm việc với chủ dự án
 

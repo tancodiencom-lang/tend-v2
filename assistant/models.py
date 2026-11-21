@@ -56,13 +56,13 @@ class Feedback(models.Model):
         TEAM = "to", "Hỏi tổ thợ (tổ mới, tên gần giống)"
         NO_STAFF = "thieu_tho", "Báo cáo chưa có tên thợ"
         REASON = "ly_do", "Hỏi lý do (báo giảm, sửa công)"
-        UNREAD = "chua_doc", "Phần tin bot chưa đọc được"
+        UNREAD = "chua_doc", "Phần tin trợ lý chưa đọc được"
         CODE = "ma", "Mã chi tiết không có trên bản vẽ"
         VALUE = "thieu_so", "Việc có mã nhưng thiếu % hoặc khối lượng"
         PROJECT = "cong_trinh", "Hỏi công trình nào"
         PARTY = "doi_tuong", "Hỏi đối tượng thu chi"
         DUPLICATE = "nghi_trung", "Hỏi phiếu nghi trùng"
-        NOT_UNDERSTOOD = "khong_hieu", "Bot không hiểu tin"
+        NOT_UNDERSTOOD = "khong_hieu", "Trợ lý không hiểu tin"
         FAILED = "khong_ghi", "Phiếu không ghi được"
 
     kind = models.CharField(max_length=10, choices=Kind.choices, default=Kind.USER)

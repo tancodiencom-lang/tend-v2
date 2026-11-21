@@ -3,7 +3,7 @@
 <p><a href="{% url 'staff' %}">‹ Tài khoản đăng nhập</a></p>
 <h1>{% if person %}{{ person }} <span class="muted">({{ person.username }})</span>{% else %}Thêm tài khoản{% endif %}</h1>
 {% for m in messages %}<p class="{% if m.level_tag == 'error' %}err{% else %}good{% endif %}" role="status">{{ m }}</p>{% endfor %}
-{% if person and not person.is_active %}<p class="err">▼ Tài khoản đang khoá: không đăng nhập được, bot không làm việc với người này.</p>{% endif %}
+{% if person and not person.is_active %}<p class="err">▼ Tài khoản đang khoá: không đăng nhập được, trợ lý Telegram không làm việc với người này.</p>{% endif %}
 <form method="post" class="box stack">{% csrf_token %}<input type="hidden" name="action" value="save">
   <h2>Thông tin và quyền</h2>
   {% if not person %}<label>Tên đăng nhập <input name="username" value="{{ form.username|default:'' }}" required autocomplete="off" placeholder="vd nam.gs"></label>{% endif %}

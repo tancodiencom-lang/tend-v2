@@ -169,7 +169,7 @@ def handle(link_row, command, text, state_set):
         transaction.on_commit(lambda: notify_question(question))
         return "Đã chuyển câu hỏi cho Giám đốc. Trợ lý sẽ nhắn lại câu trả lời ở đây.", None
     if command == "/gopy":
-        tasks.add_feedback(user, arg, context="bot /gopy")
+        tasks.add_feedback(user, arg, context="Telegram /gopy")
         return "Cảm ơn anh/chị. Trợ lý đã ghi góp ý; sáng thứ Hai Giám đốc nhận tổng hợp.", None
     return None
 

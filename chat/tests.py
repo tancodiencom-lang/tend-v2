@@ -689,7 +689,7 @@ class StandardReportTests(BotCase):
             self.message(self.site, "trát tường tầng 1 được 20%, thợ xây 3 thợ 2 phụ")
         proposal = self.proposal()
         summary = bot.summary(proposal)
-        self.assertIn("Lần sau nhắn theo mẫu này", summary)
+        self.assertIn("Lần sau anh/chị nhắn theo mẫu này", summary)
         self.assertIn("TN-22 ", summary)
         self.assertIn("T1.2 20%", summary)
         self.assertIn("/ban-ve/TN-22/khoi-luong/", summary)

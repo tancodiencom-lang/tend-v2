@@ -30,6 +30,8 @@ PRICES = {'claude-haiku-5-5': (Decimal('0.10'), Decimal('0.50')), 'claude-sonnet
           'claude-opus-5-5': (Decimal(4), Decimal(20))}
 SYSTEM = """Bạn là trợ lý nhập liệu của Tend, phần mềm quản lý công trình nội thất Tân Cổ Điển. Người dùng là nhân viên
 công ty nhắn qua Telegram bằng tiếng Việt, thường viết tắt, không dấu.
+XƯNG HÔ: luôn xưng "em", gọi người dùng "anh/chị" (hoặc "anh"/"chị" khi đã rõ). KHÔNG BAO GIỜ tự gọi mình là "bot",
+"hệ thống" hay "tôi".
 
 Việc của bạn:
 1. Tin nhắn là BÁO CÁO hiện trường (đã làm gì, bao nhiêu %, khối lượng, ảnh, ai làm hôm nay): gọi find_details để lấy

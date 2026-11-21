@@ -48,12 +48,12 @@ PROPOSAL_TTL = timedelta(hours=24)
 PHOTO_WINDOW = timedelta(minutes=30)
 IMAGE_FILE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 CODE_ONLY = re.compile(r"^\s*([A-Za-z]{1,3}[0-9M]\d*(?:\.\d+)+)\s*$")
-HELP = ("Tend qua Telegram:\n"
+HELP = ("Em là trợ lý Tend trên Telegram. Anh/chị dùng như sau:\n"
         "• Báo cáo + chấm công: gửi ảnh rồi nhắn, ví dụ \"TN-22 T2.5 40%, S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; "
-        "Tâm 4 giờ\". Anh/chị gửi báo cáo là tự có công tại công trình đó. Bot lập phiếu, bấm Xác nhận mới ghi.\n"
-        "• Ảnh cho từng chi tiết: chú thích ảnh ghi mã (vd T2.5); ảnh không chú thích bot sẽ hỏi.\n"
+        "Tâm 4 giờ\". Anh/chị gửi báo cáo là tự có công tại công trình đó. Em lập phiếu, anh/chị bấm Xác nhận mới ghi.\n"
+        "• Ảnh cho từng chi tiết: chú thích ảnh ghi mã (vd T2.5); ảnh không chú thích em sẽ hỏi.\n"
         "• Việc ngoài bản vẽ ghi mỗi việc một dòng sau dấu + (vd \"+ Cắt đục sàn mái\"), không tính % tiến độ. Kế hoạch ngày "
-        "mai: dòng \"Dự kiến 21/11: Trát tường tầng 4; Đánh lạnh tầng 5\"; hôm sau bot so với việc thực làm.\n"
+        "mai: dòng \"Dự kiến 21/11: Trát tường tầng 4; Đánh lạnh tầng 5\"; hôm sau em so với việc thực làm.\n"
         "• Hỏi: \"TN-22 đang chậm bao nhiêu?\", \"tháng này Hùng bao nhiêu công?\"\n"
         "• Lệnh: /tongquan, /cong (công tháng này), /yeucau, /congtrinh, /suacong TN-22 17/11 Hùng 0,5 lý do …, "
         "/dongia Hùng 450000 khoán (Giám đốc, kế toán), /ngatketnoi, /trogiup\n"
@@ -213,7 +213,7 @@ def _ask(proposal, topic, text, key=None, log=True, count=True):
     proposal.payload = {**proposal.payload, "asks": asks}
     proposal.save(update_fields=["payload"])
     if log:
-        task_bot.friction(proposal.link.user, text, f"bot hỏi lại · phiếu {proposal.get_kind_display().lower()}", topic=topic,
+        task_bot.friction(proposal.link.user, text, f"em hỏi lại · phiếu {proposal.get_kind_display().lower()}", topic=topic,
                           project=proposal.project)
 
 
@@ -311,7 +311,7 @@ def build_report(link_row, data, source_text):
         lines.append(entry)
     if unknown:
         task_bot.friction(user, f"Mã {', '.join(unknown)} không có trên bản vẽ {project.code}: {source_text}",
-                          "bot hỏi lại · phiếu báo cáo ngày", topic=Feedback.Topic.CODE, project=project)
+                          "em hỏi lại · phiếu báo cáo ngày", topic=Feedback.Topic.CODE, project=project)
         raise ValidationError("Không thấy chi tiết " + ", ".join(unknown) + f" trên bản vẽ {project.code}. Nhắn lại đúng mã (vd T2.5). "
                               f"Tra mã: {settings.APP_URL}/ban-ve/{project.code}/khoi-luong/")
     extra = []
@@ -348,7 +348,7 @@ def build_report(link_row, data, source_text):
     if data.get("asked_project"):
         _ask(proposal, Feedback.Topic.PROJECT, "", "project", log=False)
     if payload.get("unread"):
-        _ask(proposal, Feedback.Topic.UNREAD, f"Bot chưa đọc được: \"{payload['unread']}\"", "unread")
+        _ask(proposal, Feedback.Topic.UNREAD, f"Em chưa đọc được: \"{payload['unread']}\"", "unread")
     for row in extra:
         if row.get("code"):
             _ask(proposal, Feedback.Topic.VALUE, f"{row['code']} có trên bản vẽ nhưng tin không ghi %: {row['description']}",
@@ -402,7 +402,7 @@ def _after_change(link_row, proposal):
     waiting = needs_reason(proposal)
     _state(link_row, reason_for=str(proposal.pk) if waiting else None)
     for label in waiting:
-        _ask(proposal, Feedback.Topic.REASON, f"Bot hỏi lý do (báo thấp hơn mức đã báo hoặc sửa công): {label}", f"reason:{label}")
+        _ask(proposal, Feedback.Topic.REASON, f"Em hỏi lý do (báo thấp hơn mức đã báo hoặc sửa công): {label}", f"reason:{label}")
 
 
 def summary(proposal):
@@ -433,7 +433,7 @@ def summary(proposal):
                     out.append(f"  ⚠ {row['code']} có trên bản vẽ nhưng chưa có %: muốn tính tiến độ thì nhắn lại kiểu "
                                f"\"{proposal.project.code} {row['code']} 40%\".")
         if p.get("unread"):
-            out.append(f"⚠ Bot CHƯA ĐỌC được phần: \"{p['unread']}\". Nếu là chấm công, nhắn lại kiểu: "
+            out.append(f"⚠ Em CHƯA ĐỌC được phần: \"{p['unread']}\". Nếu là chấm công, nhắn lại kiểu: "
                        f"{proposal.project.code if proposal.project else 'TN-22'} … Công: Thắng phụ, Thuận thợ (phiếu này chưa có các tên đó).")
         people = p.get("people") or []
         author = proposal.link.user
@@ -454,7 +454,7 @@ def summary(proposal):
             elif person["status"] == "skip":
                 line = f"• {person['name']}: bỏ qua"
             else:
-                line = f"• {person['name']}: {days} công · ? chưa rõ người (bấm chọn ở tin bot hỏi)"
+                line = f"• {person['name']}: {days} công · ? chưa rõ người (bấm chọn ở tin em hỏi)"
             if person.get("warning"):
                 line += f" ⚠ {person['warning']}"
             out.append(line)
@@ -465,14 +465,14 @@ def summary(proposal):
                 if row["status"] == "none":
                     line += " — lần sau ghi tên tổ, vd \"tổ xây: 3 thợ 2 phụ\"; thợ công nhật thì ghi tên từng người"
                 elif row["status"] in ("ask", "new"):
-                    line += " — bấm chọn ở tin bot hỏi"
+                    line += " — bấm chọn ở tin em hỏi"
                 out.append(line)
         common = proposal.photos.filter(target="").count()
         if common:
             out.append(f"Ảnh chung: {common}")
         waiting = proposal.photos.filter(target="?").count()
         if waiting:
-            out.append(f"Còn {waiting} ảnh chưa chọn chi tiết: bấm nút dưới từng ảnh bot gửi lại.")
+            out.append(f"Còn {waiting} ảnh chưa chọn chi tiết: bấm nút dưới từng ảnh em gửi lại.")
         if p.get("lines") and any(not proposal.photos.filter(target=f"item:{l['item_id']}").exists() for l in p["lines"]):
             out.append("Thêm ảnh cho chi tiết: gửi ảnh, chú thích ghi mã chi tiết (vd T2.5).")
         if needs_reason(proposal):
@@ -491,7 +491,7 @@ def summary(proposal):
     else:
         out.append(f"Trả lời yêu cầu: {p['note']}")
     if proposal.kind == Proposal.Kind.REPORT and p.get("free"):
-        out += ["", "📝 Lần sau nhắn theo mẫu này, bot hiểu ngay không cần hỏi lại (việc có trên bản vẽ ghi mã; việc ngoài bản vẽ "
+        out += ["", "📝 Lần sau anh/chị nhắn theo mẫu này, em hiểu ngay không cần hỏi lại (việc có trên bản vẽ ghi mã; việc ngoài bản vẽ "
                     "ghi sau dấu +):", standard_text(proposal),
                 f"Tra mã chi tiết: bản vẽ {settings.APP_URL}/ban-ve/{proposal.project.code}/ · bảng khối lượng "
                 f"{settings.APP_URL}/ban-ve/{proposal.project.code}/khoi-luong/"]
@@ -583,7 +583,7 @@ def offer_staff(chat_id, proposal):
     proposal.save(update_fields=["payload"])
     crew = "; ".join(crew_line(c) for c in crews)
     _ask(proposal, Feedback.Topic.NO_STAFF, "Báo cáo không có tên thợ, không có tổ" + (f" (tin ghi \"{crew}\")" if crew else "")
-         + ", bot đưa danh sách nhân sự để bấm", "staff")
+         + ", em đưa danh sách nhân sự để bấm", "staff")
 
 
 def add_person(link_row, short_id, worker_id):
@@ -623,7 +623,7 @@ def ask_photos(chat_id, proposal):
         sent = telegram.send_photo(chat_id, photo.file_id, "Ảnh này của chi tiết nào?", buttons) if photo.file_id else None
         photo.prompt_message_id = (sent or {}).get("message_id") or 0
         photo.save(update_fields=["prompt_message_id"])
-        _ask(proposal, Feedback.Topic.PHOTO, "Ảnh gửi không ghi mã chi tiết, bot hỏi ảnh của chi tiết nào ("
+        _ask(proposal, Feedback.Topic.PHOTO, "Ảnh gửi không ghi mã chi tiết, em hỏi ảnh của chi tiết nào ("
              + ", ".join(line["code"] for line in lines[:12]) + ")", f"photo:{photo.pk}")
 
 
@@ -644,7 +644,7 @@ def ask_people(chat_id, proposal):
         telegram.send(chat_id, text, buttons)
         asked.add(str(index))
         _ask(proposal, Feedback.Topic.PERSON, f"Tên thợ \"{person['name']}\" " + ("gần giống nhiều người" if person["status"] == "ask"
-                                                                              else "chưa có trong danh sách") + ", bot hỏi là ai",
+                                                                              else "chưa có trong danh sách") + ", em hỏi là ai",
              f"person:{index}")
     if asked != set(proposal.payload.get("asked") or []):
         proposal.payload = {**proposal.payload, "asked": sorted(asked)}
@@ -667,7 +667,7 @@ def ask_teams(chat_id, proposal):
         telegram.send(chat_id, text, buttons)
         asked.add(str(index))
         _ask(proposal, Feedback.Topic.TEAM, f"Tổ \"{row['name']}\" " + ("gần giống tổ có sẵn" if row["status"] == "ask"
-                                                                       else "chưa có ở công trình") + ", bot hỏi là tổ nào",
+                                                                       else "chưa có ở công trình") + ", em hỏi là tổ nào",
              f"team:{index}", count=row["status"] == "ask")
     if asked != set(proposal.payload.get("asked_teams") or []):
         proposal.payload = {**proposal.payload, "asked_teams": sorted(asked)}
@@ -946,7 +946,7 @@ def decide(link_row, proposal_id, confirm):
         if score is not None:
             done += f"\nMức đầy đủ báo cáo: {score.text()}."
             if score.total < quality.GOOD:
-                done += " Lần sau ghi mã chi tiết + %, kèm ảnh (chú thích ghi mã) và tên thợ để bot không phải hỏi lại."
+                done += " Lần sau ghi mã chi tiết + %, kèm ảnh (chú thích ghi mã) và tên thợ để em không phải hỏi lại."
     return done
 
 
@@ -1168,7 +1168,7 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None, desk
     if desk is not None and desk.key != "giamsat":
         hint = ("nhắn theo mẫu \"trả NCC 5tr Cát Hùng Vương TN-22 PC12 ck - cát vàng\" (thu khách, thu khác, nhận hàng, khoán, trả "
                 "NCC, trả tổ, trả lương, chi)" if desk.key in desks.MONEY else "dùng lệnh /tongquan, /viec, /giao, /hoi")
-        task_bot.friction(user, text, f"bot không hiểu tin nhắn ({desk.name})", topic=Feedback.Topic.NOT_UNDERSTOOD)
+        task_bot.friction(user, text, f"em không hiểu tin nhắn ({desk.name})", topic=Feedback.Topic.NOT_UNDERSTOOD)
         return (f"{desk.label} chưa hiểu tin này" + ("" if ai.available() else " (trợ lý AI chưa bật)") + f": {hint}. "
                 "Việc khác gọi trợ lý khác: @giamsat, @ketoannoibo, @mkt, @troly; @dong để đóng."), None
     projects = reads.projects(user)
@@ -1184,8 +1184,8 @@ def handle_text(link_row, text, group=None, passive=False, message_id=None, desk
         return None, None
     if group is not None:
         return escalate(text), None
-    task_bot.friction(user, text, "bot không hiểu tin nhắn", topic=Feedback.Topic.NOT_UNDERSTOOD)
-    return ("Chưa hiểu tin nhắn. Trợ lý AI chưa bật nên bot đọc cú pháp ngắn, ví dụ:\n"
+    task_bot.friction(user, text, "em không hiểu tin nhắn", topic=Feedback.Topic.NOT_UNDERSTOOD)
+    return ("Em chưa hiểu tin nhắn. Phần AI chưa bật nên em chỉ đọc được cú pháp ngắn, ví dụ:\n"
             "\"TN-22 T2.5 40% S2.1 xong. Công: tổ xây: Hùng, Nam, Lan nửa ngày; Tâm 4 giờ\" (kèm ảnh).\n"
             "/trogiup để xem lệnh; /hoi <câu hỏi> để hỏi Giám đốc."
             + "".join(f"\nTra mã chi tiết {p.code}: {settings.APP_URL}/ban-ve/{p.code}/khoi-luong/" for p in reads.projects(user)[:3])), None
@@ -1208,7 +1208,7 @@ def _date_hint(link_row, text):
     if not parse.REPORT_HEAD.match(text) or (link_row.state or {}).get("date_hint") == today:
         return
     _state(link_row, date_hint=today)
-    telegram.send(link_row.chat_id, "Tin \"" + text[:60] + "…\" trong nhóm chưa ghi ngày nên bot chưa lập phiếu. Báo cáo trong nhóm "
+    telegram.send(link_row.chat_id, "Tin \"" + text[:60] + "…\" trong nhóm chưa ghi ngày nên em chưa lập phiếu. Báo cáo trong nhóm "
                   f"mở đầu kèm ngày, vd \"Báo cáo ngày {timezone.localdate():%d/%m}\" hoặc \"Công việc ngày "
                   f"{timezone.localdate():%d/%m}\", rồi các dòng + việc đã làm, nhân sự theo tổ, dự kiến mai.")
 
@@ -1216,7 +1216,7 @@ def _date_hint(link_row, text):
 def ask_project(link_row, text, projects):
     """Báo cáo không ghi mã công trình, người gửi có nhiều công trình: giữ tin, gửi nút chọn công trình (tin riêng)."""
     _state(link_row, report_text=text[:4000])
-    task_bot.friction(link_row.user, f"Báo cáo không ghi mã công trình: {text}", "bot hỏi lại · phiếu báo cáo ngày",
+    task_bot.friction(link_row.user, f"Báo cáo không ghi mã công trình: {text}", "em hỏi lại · phiếu báo cáo ngày",
                       topic=Feedback.Topic.PROJECT)
     telegram.send(link_row.chat_id, "Báo cáo này của công trình nào? Bấm chọn (lần sau ghi mã công trình ở đầu tin, vd "
                   f"\"{projects[0].code if projects else 'TN-22'} …\").",
@@ -1249,7 +1249,7 @@ def _void(link_row, ref, reason, text):
     if not sent:
         return ("Phiếu cũ hoặc đã xuất MISA cần Giám đốc duyệt huỷ, nhưng chưa có Giám đốc nào kết nối Telegram. "
                 "Báo Giám đốc kết nối rồi gửi lại."), None
-    return "Phiếu cũ hoặc đã xuất MISA: đã gửi Giám đốc duyệt huỷ. Bot sẽ báo lại khi Giám đốc quyết định.", None
+    return "Phiếu cũ hoặc đã xuất MISA: đã gửi Giám đốc duyệt huỷ. Em sẽ báo lại khi Giám đốc quyết định.", None
 
 
 def _sender(message):
@@ -1288,7 +1288,7 @@ def secret_alert(chat_id, message, external_id, leaked, group_title=""):
     (không kèm nội dung). Không ghi gì của tin vào CSDL."""
     kinds = ", ".join(leaked)
     removed = bool(telegram.delete(chat_id, message.get("message_id"))) if message.get("message_id") else False
-    where = f"nhóm \"{group_title}\"" if group_title else "chat riêng với bot"
+    where = f"nhóm \"{group_title}\"" if group_title else "chat riêng với trợ lý"
     telegram.send(chat_id, f"🔐 Trợ lý IT: tin vừa rồi có vẻ chứa {kinds}. " + ("Em đã xoá tin. " if removed else
                   "Em không xoá được, anh/chị xoá tin ngay (Xoá cho mọi người). ")
                   + "Tin đã đi qua máy chủ Telegram nên hãy ĐỔI mật khẩu/khoá đó, rồi lưu bản mới trong Bitwarden — không gửi qua chat.")
@@ -1297,7 +1297,7 @@ def secret_alert(chat_id, message, external_id, leaked, group_title=""):
     for row in ChatLink.objects.filter(active=True, user__is_active=True).select_related("user"):
         if row.user.is_director and (sender is None or row.user_id != sender.user_id):
             telegram.send(row.chat_id, f"🔐 Trợ lý IT: {who} vừa nhắn {kinds} trong {where}; "
-                          + ("bot đã xoá tin" if removed else "bot KHÔNG xoá được tin") + ". Nhắc đổi khoá đó và cập nhật sổ tài khoản.")
+                          + ("em đã xoá tin" if removed else "em KHÔNG xoá được tin") + ". Nhắc đổi khoá đó và cập nhật sổ tài khoản.")
 
 
 def _error_text(error):
@@ -1444,7 +1444,7 @@ def _desk_step(link_row, chat_id, text, has_photo):
     if expired is not None:
         _state(link_row, desk=None, desk_at=None)
         telegram.send(chat_id, f"⏱ {expired.label} đã tự đóng sau {desks.idle_hours():g} giờ không nhắn"
-                      + (f"; anh/chị đang ở {desk.label}." if desk else "; tin này bot tự nhận biết như bình thường."))
+                      + (f"; anh/chị đang ở {desk.label}." if desk else "; tin này em tự nhận biết như bình thường."))
     call, rest = desks.parse_call(text)
     if call is None:
         if (link_row.state or {}).get("desk"):
@@ -1459,7 +1459,7 @@ def _desk_step(link_row, chat_id, text, has_photo):
         fallback = desks.BY_KEY.get(desks.default_for(user))
         telegram.send(chat_id, (f"Đã đóng {closing.label}. " if closing else "Chưa gọi trợ lý nào. ")
                       + (f"Anh/chị đang ở {fallback.label} (bàn mặc định của vai)." if fallback
-                         else "Tin nhắn từ giờ bot tự nhận biết như bình thường.") + "\n" + desks.menu(user))
+                         else "Tin nhắn từ giờ em tự nhận biết như bình thường.") + "\n" + desks.menu(user))
         return False
     target = desks.BY_KEY[call]
     if not target.allows(user):
@@ -1542,7 +1542,7 @@ def handle_callback(callback):
     if kind == "ans":
         _state(link_row, answer_to=value)
         telegram.answer_callback(callback.get("id", ""))
-        telegram.send(chat_id, "Nhắn câu trả lời. Bot sẽ lập phiếu để anh/chị xác nhận.")
+        telegram.send(chat_id, "Anh/chị nhắn câu trả lời, em sẽ lập phiếu để anh/chị xác nhận.")
         return
     if kind not in ("ok", "no"):
         telegram.answer_callback(callback.get("id", ""))

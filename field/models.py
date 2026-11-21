@@ -15,7 +15,7 @@ from projects.models import Project
 class Report(models.Model):
     class Via(models.TextChoices):
         SHORT = "ngan", "Cú pháp ngắn"
-        FREE = "tu_do", "Nhắn tự do (bot đọc)"
+        FREE = "tu_do", "Nhắn tự do (trợ lý đọc)"
         AI = "ai", "Nhắn tự do (AI đọc)"
 
     project = models.ForeignKey(Project, verbose_name="Công trình", on_delete=models.PROTECT, related_name="reports")
@@ -27,7 +27,7 @@ class Report(models.Model):
     created_at = models.DateTimeField("Gửi lúc", auto_now_add=True)
     # Dữ kiện để chấm mức đầy đủ (field/quality.py tính điểm lúc đọc). Báo cáo trước đợt 8a: via trống, named None.
     via = models.CharField("Cách nhắn", max_length=8, choices=Via.choices, blank=True)
-    asked = models.PositiveSmallIntegerField("Số lần bot phải hỏi lại", default=0)
+    asked = models.PositiveSmallIntegerField("Số lần trợ lý phải hỏi lại", default=0)
     named = models.PositiveSmallIntegerField("Số người có tên trong phiếu", null=True, blank=True)
 
     class Meta:
