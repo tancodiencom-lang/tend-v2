@@ -72,6 +72,12 @@ class Asset(models.Model):
     origin = models.CharField("Gốc (mã ảnh báo cáo / ảnh chat / đường dẫn Drive)", max_length=400, blank=True)
     blocked = models.BooleanField("Không dùng nữa", default=False)
     block_reason = models.CharField("Lý do không dùng", max_length=300, blank=True)
+    # chất lượng (marketing/quality.py): đo khi vào kho; ảnh hỏng (tối đen, cháy sáng, nhoè, quá nhỏ) không được chọn vào bài
+    metrics = models.JSONField("Số đo kỹ thuật", default=dict, blank=True)
+    flaws = models.CharField("Lỗi kỹ thuật", max_length=120, blank=True)
+    broken = models.BooleanField("Hỏng, không sửa được", default=False)
+    ai_score = models.PositiveSmallIntegerField("Điểm AI gần nhất (1–5)", null=True, blank=True)
+    passed_over = models.PositiveSmallIntegerField("Số lần người duyệt đổi ảnh này", default=0)
     added_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -152,6 +158,7 @@ class PostAsset(models.Model):
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name="items")
     asset = models.ForeignKey(Asset, on_delete=models.PROTECT, related_name="uses")
     order = models.PositiveSmallIntegerField()
+    original = models.BooleanField("Dùng ảnh gốc (không tự chỉnh)", default=False)
 
     class Meta:
         ordering = ["post", "order"]

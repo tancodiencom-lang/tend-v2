@@ -15,7 +15,7 @@ from django.views.decorators.http import require_GET, require_POST
 from projects.models import Project
 
 from . import assets as asset_files
-from . import bot, publish, services, writer
+from . import bot, publish, quality, services, writer
 from .models import Asset, Channel, Idea, Post, PostTarget, StyleSample
 
 
@@ -82,6 +82,7 @@ def post_action(request, pk, action):
         "doi-anh": (lambda: services.swap_asset(user, post, index, block=data.get("block") == "1", channel="web"), "Đã đổi ảnh."),
         "bot-anh": (lambda: services.remove_asset(user, post, index, channel="web"), "Đã bớt ảnh."),
         "len-dau": (lambda: services.move_first(user, post, index, channel="web"), "Đã đưa ảnh lên đầu."),
+        "anh-goc": (lambda: services.toggle_original(user, post, index, channel="web"), "Đã đổi bản ảnh (cần duyệt lại)."),
         "kenh": (lambda: services.toggle_channel(user, post, get_object_or_404(Channel, pk=data.get("channel")), channel="web"),
                  "Đã đổi Trang đăng."),
         "thu-lai": (lambda: publish.retry(user, post, via="web"), "Bài sẽ đăng lại trong vài phút."),
@@ -147,13 +148,21 @@ def asset_list(request):
     project = Project.objects.filter(code=request.GET.get("cong_trinh", "")).first()
     if project:
         rows = rows.filter(project=project)
+    if request.GET.get("loi") == "1":
+        rows = rows.filter(Q(broken=True) | Q(ai_score__lt=writer.MIN_SCORE) | Q(passed_over__gte=writer.MAX_PASSED))
     if request.GET.get("bo") == "1":
         rows = rows.filter(blocked=True)
     else:
         rows = rows.filter(blocked=False)
-    return render(request, "marketing/assets.html", {"rows": rows[:120], "project": project, "used": writer.used_ids(),
+    rows = list(rows[:120])
+    for asset in rows:
+        asset.labels = quality.labels(asset.flaws)
+        asset.skipped = (asset.broken or (asset.ai_score is not None and asset.ai_score < writer.MIN_SCORE)
+                         or asset.passed_over >= writer.MAX_PASSED)
+    return render(request, "marketing/assets.html", {"rows": rows, "project": project, "used": writer.used_ids(),
                                                       "projects": Project.objects.filter(active=True).order_by("code"),
-                                                      "blocked": request.GET.get("bo") == "1"})
+                                                      "blocked": request.GET.get("bo") == "1", "faulty": request.GET.get("loi") == "1",
+                                                      "min_score": writer.MIN_SCORE})
 
 
 @login_required
@@ -175,7 +184,7 @@ def asset_image(request, pk):
     _marketing(request)
     asset = get_object_or_404(Asset, pk=pk)
     size = min(max(int(request.GET.get("w", 480)) if request.GET.get("w", "").isdecimal() else 480, 120), 1600)
-    data = asset_files.thumbnail(asset, size, 82)
+    data = asset_files.thumbnail(asset, size, 82, enhanced=request.GET.get("chinh") == "1")
     if data is None:
         raise Http404
     response = HttpResponse(data, content_type="image/jpeg")
