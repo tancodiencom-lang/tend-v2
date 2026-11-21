@@ -28,9 +28,14 @@ def _clean(text, size):
 
 
 def package_sha(post):
-    """Dấu của bản bài: chữ + ảnh (sha từng ảnh, đúng thứ tự) + kênh. Bất kỳ thay đổi nào → dấu mới → phải duyệt lại."""
-    data = {"text": post.text, "assets": list(post.items.order_by("order").values_list("asset__sha256", flat=True)),
-            "channels": sorted(post.channels.values_list("pk", flat=True))}
+    """Dấu của bản bài: chữ + ảnh (sha từng ảnh, đúng thứ tự) + kênh + ảnh nào tự chỉnh (và phiên bản cách chỉnh). Bất kỳ
+    thay đổi nào → dấu mới → phải duyệt lại. Bài cũ toàn ảnh gốc giữ đúng dấu như trước khi có phần tự chỉnh."""
+    from . import enhance
+    items = list(post.items.order_by("order").values_list("asset__sha256", "original"))
+    data = {"text": post.text, "assets": [sha for sha, _ in items], "channels": sorted(post.channels.values_list("pk", flat=True))}
+    enhanced = [index for index, (_, original) in enumerate(items) if not original]
+    if enhanced:
+        data["enhanced"] = {"items": enhanced, "v": enhance.VERSION}
     return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
@@ -49,9 +54,11 @@ def _editable(post):
 
 
 def _set_assets(post, assets):
+    """Ghi lại danh sách ảnh theo thứ tự; ảnh còn trong bài giữ lựa chọn ảnh gốc/ảnh chỉnh, ảnh mới mặc định tự chỉnh."""
+    keep = dict(post.items.values_list("asset_id", "original"))
     post.items.all().delete()          # bảng nối của bài nháp; nhật ký giữ ở dấu package_sha của bài
     for order, asset in enumerate(assets):
-        PostAsset.objects.create(post=post, asset=asset, order=order)
+        PostAsset.objects.create(post=post, asset=asset, order=order, original=keep.get(asset.pk, False))
 
 
 @transaction.atomic
@@ -103,6 +110,10 @@ def swap_asset(user, post, index, replacement=None, block=False, reason="", chan
     old = current[index]
     if block:
         block_asset(user, old, reason or f"Người duyệt loại khỏi bài #{post.pk}", channel)
+    else:                              # ảnh người duyệt đổi đi: xếp sau khi chọn lần sau, đổi 2 lần thì thôi đề xuất
+        old = Asset.objects.select_for_update().get(pk=old.pk)
+        old.passed_over += 1
+        record_save(old, user, f"Người duyệt đổi ảnh này khỏi bài #{post.pk}", channel=channel)
     new = replacement or next_candidate(post.project, exclude=[a.pk for a in current])
     if new is None:
         raise ValidationError("Kho không còn ảnh phù hợp để đổi. Gửi thêm ảnh cho trợ lý hoặc bớt ảnh này.")
@@ -124,6 +135,22 @@ def remove_asset(user, post, index, channel="telegram"):
     _set_assets(post, current)
     post.state = Post.State.DRAFT
     return _refresh(post, user, f"Bớt ảnh {index + 1}", channel)
+
+
+@transaction.atomic
+def toggle_original(user, post, index, channel="telegram"):
+    """Ảnh số `index`: dùng ảnh gốc ↔ dùng bản tự chỉnh (sáng, màu, nét). Bản mới → phải duyệt lại."""
+    _can(user)
+    post = _locked(post)
+    _editable(post)
+    items = list(post.items.order_by("order"))
+    if not 0 <= index < len(items):
+        raise ValidationError("Không có ảnh số đó trong bài.")
+    item = items[index]
+    item.original = not item.original
+    item.save(update_fields=["original"])
+    post.state = Post.State.DRAFT
+    return _refresh(post, user, f"Ảnh {index + 1}: " + ("dùng ảnh gốc" if item.original else "dùng bản tự chỉnh"), channel)
 
 
 @transaction.atomic

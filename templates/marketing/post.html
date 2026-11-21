@@ -8,11 +8,13 @@
 {% if post.note %}<p class="muted">Ghi chú trợ lý: {{ post.note }}</p>{% endif %}
 
 <h2>Ảnh ({{ items|length }}) — ảnh 1 hiện đầu tiên</h2>
-<div class="gallery">{% for it in items %}<section class="card"><img src="{% url 'marketing_image' it.asset_id %}?w=640" alt="Ảnh {{ forloop.counter }}" style="width:100%;border-radius:6px">
+<div class="gallery">{% for it in items %}<section class="card"><img src="{% url 'marketing_image' it.asset_id %}?w=640{% if not it.original %}&amp;chinh=1{% endif %}" alt="Ảnh {{ forloop.counter }}" style="width:100%;border-radius:6px">
+<p class="muted">{% if it.original %}○ Ảnh gốc{% else %}✨ Đã tự chỉnh sáng, màu, nét{% endif %}{% if it.asset.ai_score %} · AI chấm {{ it.asset.ai_score }}/5{% endif %}{% if it.asset.flaws %} · đo: {{ it.asset.flaws }}{% endif %}</p>
 <p><b>Ảnh {{ forloop.counter }}</b> <span class="muted">· {{ it.asset.get_source_display }}{% if it.asset.project %} · {{ it.asset.project.code }}{% endif %}{% if it.asset.taken_on %} · {{ it.asset.taken_on|date:"d/m/Y" }}{% endif %}{% if it.asset.context %} · {{ it.asset.context }}{% endif %}</span></p>
 {% if editable %}<div class="acts">
 <form method="post" action="{% url 'marketing_post_action' post.pk 'doi-anh' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><button class="btn plain" type="submit">🔄 Đổi ảnh khác</button></form>
 <form method="post" action="{% url 'marketing_post_action' post.pk 'doi-anh' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><input type="hidden" name="block" value="1"><button class="btn plain" type="submit">🚫 Không dùng ảnh này nữa</button></form>
+<form method="post" action="{% url 'marketing_post_action' post.pk 'anh-goc' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><button class="btn plain" type="submit">{% if it.original %}✨ Dùng bản tự chỉnh{% else %}↩ Dùng ảnh gốc{% endif %}</button></form>
 {% if not forloop.first %}<form method="post" action="{% url 'marketing_post_action' post.pk 'len-dau' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><button class="btn plain" type="submit">⬆ Lên đầu</button></form>{% endif %}
 {% if items|length > 1 %}<form method="post" action="{% url 'marketing_post_action' post.pk 'bot-anh' %}">{% csrf_token %}<input type="hidden" name="i" value="{{ forloop.counter0 }}"><button class="btn plain" type="submit">🗑 Bớt</button></form>{% endif %}
 </div>{% endif %}</section>{% empty %}<p class="muted">Bài không có ảnh.</p>{% endfor %}</div>

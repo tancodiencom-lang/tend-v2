@@ -73,7 +73,7 @@ def publish_target(target):
     photo_ids = []
     for index, item in enumerate(items):
         _step(target, PublishStep.Step.UPLOAD_INTENT, index)
-        data = asset_files.for_publish(item.asset)
+        data = asset_files.for_publish(item.asset, enhanced=not item.original)     # đúng bản người duyệt đã xem
         try:
             if data is None:
                 raise facebook.FacebookError(f"Ảnh {index + 1} không đọc được trên máy chủ.")

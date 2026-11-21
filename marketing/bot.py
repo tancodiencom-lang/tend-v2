@@ -42,6 +42,12 @@ def anchor_text(post):
     lines = [f"BÀI NHÁP #{post.pk} · ngày {post.for_date:%d/%m} · {who}" + (" · AI viết" if post.ai_written else ""),
              f"Đăng lên: {channels}", "", post.text, "",
              f"Ảnh: {items} (ảnh 1 hiện đầu tiên; Facebook có thể tự sắp bố cục khác)" if items else "Bài không có ảnh."]
+    originals = [str(n) for n, flag in enumerate(post.items.order_by("order").values_list("original", flat=True), 1) if flag]
+    if items and len(originals) == items:
+        lines.append("Ảnh dùng bản gốc, chưa tự chỉnh. Muốn tự chỉnh sáng, màu: 🔄 Đổi/bớt ảnh › ✨.")
+    elif items:
+        lines.append("Ảnh đã tự chỉnh nhẹ sáng, màu, nét" + (f"; ảnh dùng bản gốc: {', '.join(originals)}" if originals else "")
+                     + ". Muốn dùng ảnh gốc: 🔄 Đổi/bớt ảnh › ↩.")
     if post.note:
         lines.append(f"Ghi chú trợ lý: {post.note}")
     lines.append("Bấm ✓ Duyệt và đăng khi chữ, ảnh, thứ tự và Trang đều đúng. Muốn sửa: trả lời (reply) tin này kèm ý muốn sửa "
@@ -62,7 +68,7 @@ def buttons(post):
 
 def send_preview(post, links=None):
     """Album ảnh (ảnh nhỏ 1280 px) rồi tin neo có nút, tới từng người duyệt."""
-    photos = [data for data in (asset_files.thumbnail(item.asset, 1280, 82) for item in
+    photos = [data for data in (asset_files.thumbnail(item.asset, 1280, 82, enhanced=not item.original) for item in
                                 post.items.select_related("asset").order_by("order")) if data]
     for row in (links if links is not None else reviewers()):
         if photos:
@@ -82,12 +88,15 @@ def photo_menu(chat_id, post):
         telegram.send(chat_id, PREFIX + f"Bài #{post.pk} không có ảnh.")
         return
     rows, numbers = [], range(count)
-    for label, op in (("🔄", "r"), ("⬆", "f"), ("🗑", "d"), ("🚫", "b")):
+    originals = list(post.items.order_by("order").values_list("original", flat=True))
+    for label, op in (("🔄", "r"), ("⬆", "f"), ("🗑", "d"), ("🚫", "b"), ("", "o")):
         for start in range(0, count, 5):
-            rows.append([{"text": f"{label} {i + 1}", "data": f"mk:{op}:{post.pk}:{i}"} for i in numbers[start:start + 5]
+            rows.append([{"text": (("✨" if originals[i] else "↩") if op == "o" else label) + f" {i + 1}",
+                          "data": f"mk:{op}:{post.pk}:{i}"} for i in numbers[start:start + 5]
                          if not (op == "f" and i == 0) and not (op == "d" and count == 1)])
     telegram.send(chat_id, PREFIX + f"Bài #{post.pk}: 🔄 đổi ảnh số đó bằng ảnh khác trong kho · ⬆ đưa lên đầu · 🗑 bớt ảnh · "
-                  "🚫 không dùng ảnh đó nữa (đổi ảnh khác).", [r for r in rows if r])
+                  "🚫 không dùng ảnh đó nữa (đổi ảnh khác) · ↩ dùng ảnh gốc / ✨ dùng bản tự chỉnh sáng, màu.",
+                  [r for r in rows if r])
 
 
 def _post(value):
@@ -126,9 +135,11 @@ def callback(link_row, data, chat_id, state_set):
             services._can(user)
             photo_menu(chat_id, post)
             return "Chọn ảnh cần đổi."
-        if op in ("r", "b", "d", "f"):
+        if op in ("r", "b", "d", "f", "o"):
             index = int(arg) if arg.isdecimal() else -1
-            if op == "d":
+            if op == "o":
+                post = services.toggle_original(user, post, index)
+            elif op == "d":
                 post = services.remove_asset(user, post, index)
             elif op == "f":
                 post = services.move_first(user, post, index)

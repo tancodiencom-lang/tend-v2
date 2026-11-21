@@ -1,5 +1,6 @@
-"""Kho ảnh nội dung: gom ảnh mới (báo cáo hiện trường đã xác nhận, thư mục Drive đã kéo về máy chủ), ảnh thu nhỏ để
-xem/duyệt, ảnh chuẩn bị để đăng (xoay đúng chiều, bỏ thông tin EXIF/GPS — không lộ vị trí nhà khách, ≤ 2048 px, JPEG).
+"""Kho ảnh nội dung: gom ảnh mới (báo cáo hiện trường đã xác nhận, thư mục Drive đã kéo về máy chủ), đo chất lượng
+(`quality`), ảnh thu nhỏ để xem/duyệt, ảnh chuẩn bị để đăng (xoay đúng chiều, bỏ thông tin EXIF/GPS — không lộ vị trí nhà
+khách, ≤ 2048 px, JPEG). `enhanced=True`: bản tự chỉnh nhẹ (`enhance`), tính lại từ ảnh gốc mỗi lần; ảnh gốc không đổi.
 
 Chạy lại nhiều lần không thêm trùng (khoá sha256 của tệp). Ảnh chứng từ thu chi không bao giờ vào kho.
 """
@@ -18,6 +19,7 @@ from django.utils import timezone
 from core.audit import record_save
 from core.text import fold
 
+from . import enhance, quality
 from .models import Asset
 
 log = logging.getLogger(__name__)
@@ -53,6 +55,16 @@ def _valid_image(data):
         return False
 
 
+def _quality(data):
+    """→ (số đo, chuỗi lỗi, hỏng) của ảnh; ảnh không mở được coi như chưa đo."""
+    try:
+        metrics = quality.measure(quality.open_image(data))
+    except Exception:
+        return {}, "", False
+    found = quality.flaws(metrics)
+    return metrics, ", ".join(found), bool(quality.broken(metrics))
+
+
 def _add(source, data, name, **fields):
     """Thêm một ảnh (bỏ qua nếu trùng sha). `name`: đường dẫn tệp có sẵn trong MEDIA_ROOT (không chép) hoặc None để lưu mới."""
     if not data or len(data) > MAX_BYTES or not _valid_image(data):
@@ -60,7 +72,8 @@ def _add(source, data, name, **fields):
     digest = sha_of(data)
     if Asset.objects.filter(sha256=digest).exists():
         return None
-    asset = Asset(source=source, sha256=digest, **fields)
+    metrics, flaws, broken = _quality(data)
+    asset = Asset(source=source, sha256=digest, metrics=metrics, flaws=flaws, broken=broken, **fields)
     try:
         with transaction.atomic():
             if name:
@@ -142,8 +155,28 @@ def collect_drive(limit=BATCH):
     return added
 
 
+def measure_asset(asset):
+    """Đo chất lượng ảnh chưa đo (ảnh vào kho trước khi có phần đo). Trả ảnh đã cập nhật (hoặc nguyên nếu tệp mất)."""
+    data = _read(asset.image)
+    if not data:
+        return asset
+    metrics, flaws, broken = _quality(data)
+    if not metrics:
+        return asset
+    asset.metrics, asset.flaws, asset.broken = metrics, flaws, broken
+    return record_save(asset, None, "Đo chất lượng ảnh", channel="tu_dong")
+
+
+def measure_pending(limit=60):
+    done = 0
+    for asset in Asset.objects.filter(metrics={}, blocked=False).order_by("-pk")[:limit]:
+        if measure_asset(asset).metrics:
+            done += 1
+    return done
+
+
 def collect():
-    return {"bao_cao": collect_reports(), "drive": collect_drive()}
+    return {"bao_cao": collect_reports(), "drive": collect_drive(), "do": measure_pending()}
 
 
 def add_upload(user, data, filename, project=None, context=""):
@@ -161,23 +194,30 @@ def _open(asset):
     return picture.convert("RGB")
 
 
-def thumbnail(asset, size=640, quality=80):
-    """Ảnh nhỏ (JPEG bytes) để xem trên web, gửi bản duyệt qua Telegram, cho AI xem. None nếu tệp mất."""
+def _sized(asset, size, enhanced):
     picture = _open(asset)
     if picture is None:
         return None
+    settings_ = enhance.params(picture) if enhanced else None        # tham số đo trên ảnh gốc: bản nhỏ và bản đăng như nhau
     picture.thumbnail((size, size))
+    return enhance.apply(picture, settings_) if enhanced else picture
+
+
+def thumbnail(asset, size=640, quality=80, enhanced=False):
+    """Ảnh nhỏ (JPEG bytes) để xem trên web, gửi bản duyệt qua Telegram, cho AI xem. None nếu tệp mất."""
+    picture = _sized(asset, size, enhanced)
+    if picture is None:
+        return None
     out = BytesIO()
     picture.save(out, "JPEG", quality=quality)
     return out.getvalue()
 
 
-def for_publish(asset):
+def for_publish(asset, enhanced=False):
     """Ảnh để đăng: đúng chiều, KHÔNG còn EXIF (GPS, máy chụp), cạnh dài ≤ 2048 px, JPEG < 8 MiB."""
-    picture = _open(asset)
+    picture = _sized(asset, 2048, enhanced)
     if picture is None:
         return None
-    picture.thumbnail((2048, 2048))
     for quality in (90, 82, 72):
         out = BytesIO()
         picture.save(out, "JPEG", quality=quality)            # lưu mới không kèm exif=… nên không còn thông tin vị trí

@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest import mock
 
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.urls import reverse
 from django.utils import timezone
@@ -25,6 +25,7 @@ from itdesk.models import ServiceAccount
 from projects.models import Member
 
 from . import assets, facebook, publish, services, writer
+from . import bot as mkt_bot
 from .models import Asset, Channel, Idea, Post, PostTarget, PublishStep, StyleSample
 
 
@@ -93,11 +94,25 @@ class MarketingCase(BotCase):
         self.sent.clear()
 
     @staticmethod
-    def colored(file_id):
+    def colored(file_id, size=(900, 675), light=1.0, blur=0):
+        """Ảnh mẫu cỡ thật, có mép rõ (đạt chuẩn đo kỹ thuật); màu theo file_id nên mỗi ảnh khác nhau."""
         import hashlib
-        rgb = tuple(hashlib.sha256(file_id.encode()).digest()[:3])
+
+        from PIL import ImageDraw, ImageFilter
+        digest = hashlib.sha256(file_id.encode()).digest()
+        rgb = tuple(int((120 + b % 90) * light) for b in digest[:3])
+        width, height = size
+        picture = Image.new("RGB", size, rgb)
+        draw = ImageDraw.Draw(picture)
+        draw.rectangle([width // 5, height // 5, width // 2, height * 3 // 4], fill=tuple(max(0, c - 90) for c in rgb),
+                       outline=(30, 30, 30), width=4)
+        draw.rectangle([width * 3 // 5, height // 3, width * 9 // 10, height * 4 // 5], fill=tuple(min(255, c + 50) for c in rgb))
+        for x in range(0, width, 45):
+            draw.line([x, height * 4 // 5, x + 20, height], fill=(60, 50, 40), width=2)
+        if blur:
+            picture = picture.filter(ImageFilter.GaussianBlur(blur))
         out = io.BytesIO()
-        Image.new("RGB", (16, 12), rgb).save(out, "JPEG")
+        picture.save(out, "JPEG", quality=90)
         return out.getvalue()
 
     def fake_files(self, method, data, files):
@@ -131,8 +146,8 @@ class AssetAndDraftTests(MarketingCase):
         self.message(self.accountant, "", photo="phieuchi1")                   # ảnh phiếu chi: không bao giờ vào kho
         self.message(self.accountant, "chi khác 200k vật tư lặt vặt TN-22")
         self.press(self.accountant, f"ok:{self.proposal().pk}")
-        self.assertEqual(assets.collect(), {"bao_cao": 2, "drive": 0})
-        self.assertEqual(assets.collect(), {"bao_cao": 0, "drive": 0})
+        self.assertEqual(assets.collect(), {"bao_cao": 2, "drive": 0, "do": 0})
+        self.assertEqual(assets.collect(), {"bao_cao": 0, "drive": 0, "do": 0})
         rows = list(Asset.objects.all())
         self.assertEqual({a.source for a in rows}, {Asset.Source.REPORT})
         self.assertTrue(all(a.project == self.project for a in rows))
@@ -251,9 +266,10 @@ class PublishTests(MarketingCase):
     def test_multi_photo_post_with_ledger_no_exif_and_link(self):
         post = self.ready_post(3)
         self.approve(post)
-        uploads = []
+        uploads, modes = [], []
         real = assets.for_publish
-        with mock.patch.object(assets, "for_publish", side_effect=lambda a: uploads.append(real(a)) or uploads[-1]):
+        with mock.patch.object(assets, "for_publish",
+                               side_effect=lambda a, **kw: modes.append(kw.get("enhanced")) or uploads.append(real(a, **kw)) or uploads[-1]):
             with self.captureOnCommitCallbacks(execute=True):
                 call_command("dang_bai", stdout=io.StringIO())
         post.refresh_from_db()
@@ -270,6 +286,7 @@ class PublishTests(MarketingCase):
         steps = list(PublishStep.objects.filter(target=target).values_list("step", flat=True))
         self.assertEqual(steps, ["upload_intent", "upload_done"] * 3 + ["feed_intent", "feed_done", "verify"])
         self.assertTrue(all(not Image.open(io.BytesIO(data)).getexif() for data in uploads))   # không còn EXIF
+        self.assertEqual(modes, [True, True, True])                                    # đăng đúng bản tự chỉnh đã duyệt
         self.assertTrue(any("✓ Đã đăng bài" in t and "1234_999" in t for t in self.texts(self.chats[self.mkt.pk])), self.texts())
         call_command("dang_bai", stdout=io.StringIO())
         self.assertEqual(len(self.fb.posts("/feed")), 1)                              # chạy lại không đăng trùng
@@ -451,6 +468,145 @@ class PageVoiceTests(MarketingCase):
         self.reply(self.site, "sửa giúp", quoted)
         self.assertIn("Giám đốc và nhân viên Marketing", self.texts(self.chats[self.site.pk])[-1])
         self.assertEqual(Proposal.objects.count(), proposals)                       # không thành phiếu báo cáo
+
+
+class PhotoQualityTests(MarketingCase):
+    """Chọn ảnh 3 lớp (chủ dự án 21/11/2026): đo kỹ thuật → AI chấm 1–5 → tự chỉnh nhẹ (có nút dùng ảnh gốc); thiếu ảnh
+    đạt chuẩn: đăng ít ảnh, ghi chú, nhắc giám sát chụp lại. Không dùng AI tạo/vẽ lại ảnh."""
+
+    def add(self, name, project=None, **kwargs):
+        MarketingCase.shots += 1
+        return assets.add_upload(self.mkt, self.colored(f"{name}{MarketingCase.shots}", **kwargs), f"{name}.jpg", project, name)
+
+    def test_measure_flaws_and_light_auto_fix(self):
+        from . import enhance, quality
+        good = quality.open_image(self.colored("tot"))
+        self.assertEqual(quality.flaws(quality.measure(good)), [])
+        cases = {"quá tối": self.colored("den", light=0.15), "nhoè": self.colored("nhoe", blur=8),
+                 "quá nhỏ": self.colored("nho", size=(300, 200))}
+        for flaw, data in cases.items():
+            metrics = quality.measure(quality.open_image(data))
+            self.assertIn(flaw, quality.broken(metrics), (flaw, metrics))
+        dim = quality.open_image(self.colored("toi", light=0.42))
+        before = quality.measure(dim)
+        self.assertIn("hơi tối", quality.flaws(before))                              # sửa được, không phải hỏng
+        self.assertEqual(quality.broken(before), [])
+        after = quality.measure(enhance.enhance(dim))
+        self.assertGreater(after["brightness"], before["brightness"] + 25)
+        yellow = good.convert("L").convert("RGB").point([min(255, int(v * f)) for f in (1.12, 1.0, 0.72) for v in range(256)])
+        self.assertIn("lệch màu", quality.flaws(quality.measure(yellow)))
+        self.assertLess(quality.measure(enhance.enhance(yellow))["cast"], quality.measure(yellow)["cast"] * 0.7)
+        cream = good.convert("L").convert("RGB").point([min(255, int(v * f)) for f in (1.06, 1.0, 0.9) for v in range(256)])
+        self.assertEqual(enhance.params(cream)["gains"], [1.0, 1.0, 1.0])              # tông kem nhẹ là màu thật: không cân màu
+        self.assertEqual(quality.labels("nhoè, lệch màu"), ["▼ nhoè", "● lệch màu"])
+
+    def test_broken_photos_never_chosen_and_shown_in_library(self):
+        good = self.add("tot")
+        blurry, tiny = self.add("nhoe", blur=8), self.add("nho", size=(300, 200))
+        self.assertEqual([(a.broken, "nhoè" in a.flaws) for a in (good, blurry)], [(False, False), (True, True)])
+        self.assertTrue(tiny.broken)
+        self.assertEqual(writer.candidates(), [good])
+        Asset.objects.filter(pk=good.pk).update(metrics={}, flaws="", broken=False)     # ảnh vào kho trước khi có phần đo
+        self.assertEqual(assets.measure_pending(), 1)
+        self.assertTrue(Asset.objects.get(pk=good.pk).metrics)
+        self.assertTrue(AuditLog.objects.filter(reason="Đo chất lượng ảnh").exists())
+        self.client.force_login(self.mkt)
+        page = self.client.get(reverse("marketing_assets"), {"loi": "1"})
+        self.assertContains(page, "▼ nhoè")
+        self.assertContains(page, "Trợ lý không chọn ảnh này")
+        self.assertNotContains(page, f'anh/{good.pk}/')
+
+    def ai(self, captured, payload):
+        return PageVoiceTests.ai_reply(captured, payload)
+
+    def test_ai_scores_each_photo_and_code_drops_low_scores(self):
+        photos = [self.add(f"a{i}") for i in range(3)]
+        captured = []
+        payload = {"scores": [{"photo": 0, "score": 5, "issue": ""}, {"photo": 1, "score": 2, "issue": "bừa bộn bao xi măng"},
+                              {"photo": 2, "score": 4, "issue": ""}],
+                   "photos": [1, 0, 2], "text": "Bài thử", "note": "Chọn ảnh rõ"}
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "create_message", side_effect=self.ai(captured, payload)):
+            post = writer.daily()[0]
+        shown = list(reversed(photos))                                                 # AI xem ảnh mới nhất trước
+        self.assertEqual([i.asset for i in post.items.order_by("order")], [shown[0], shown[2]])   # ảnh 2 điểm bị mã loại
+        self.assertIn("dưới 3 điểm", post.note)
+        self.assertEqual([Asset.objects.get(pk=a.pk).ai_score for a in shown], [5, 2, 4])
+        self.assertNotIn(shown[1], writer.candidates())                               # lần sau không đề xuất lại
+        system = captured[0]["system"][0]["text"]
+        self.assertIn("CHẤM TỪNG ẢNH", system)
+        self.assertIn("GỌN GÀNG", system)
+        self.assertIn("scores", captured[0]["output_config"]["format"]["schema"]["required"])
+        sent = self.add("gui")                                                        # ảnh người giao bài gửi: luôn giữ, có cảnh báo
+        payload = {"scores": [{"photo": 0, "score": 1, "issue": "tối"}], "photos": [0], "text": "Bài theo ảnh gửi", "note": ""}
+        with mock.patch.object(ai, "available", return_value=True), mock.patch.object(ai, "create_message", side_effect=self.ai([], payload)):
+            post = writer.draft(timezone.localdate(), items=[sent], brief="ảnh gửi", origin=Post.Origin.REQUEST, user=self.mkt)
+        self.assertEqual([i.asset for i in post.items.all()], [sent])
+        self.assertIn("Ảnh người giao bài gửi bị chấm thấp", post.note)
+
+    def test_auto_fixed_by_default_original_on_request_and_approval_binds(self):
+        post = self.ready_post(3)
+        mkt_bot.send_preview(post)
+        self.assertEqual(list(post.items.values_list("original", flat=True)), [False, False, False])
+        self.assertIn("Ảnh đã tự chỉnh nhẹ", self.texts(self.chats[self.mkt.pk])[-1])
+        old = post.package_sha
+        self.press(self.mkt, f"mk:o:{post.pk}:1")                                     # ↩ dùng ảnh gốc cho ảnh 2
+        post.refresh_from_db()
+        self.assertEqual(list(post.items.order_by("order").values_list("original", flat=True)), [False, True, False])
+        self.assertNotEqual(post.package_sha, old)
+        self.assertIn("ảnh dùng bản gốc: 2", self.texts(self.chats[self.mkt.pk])[-1])
+        with self.assertRaises(ValidationError):
+            services.approve(self.director, post, old[:10])                            # nút duyệt bản cũ không dùng được
+        services.move_first(self.mkt, post, 1)                                         # đổi thứ tự vẫn giữ lựa chọn ảnh gốc
+        post.refresh_from_db()
+        self.assertEqual(list(post.items.order_by("order").values_list("original", flat=True)), [True, False, False])
+        self.client.force_login(self.mkt)
+        page = self.client.get(reverse("marketing_post", args=[post.pk]))
+        self.assertContains(page, "✨ Dùng bản tự chỉnh")
+        self.assertContains(page, "↩ Dùng ảnh gốc")
+        asset = post.items.order_by("order").last().asset
+        plain = self.client.get(reverse("marketing_image", args=[asset.pk]), {"w": 300}).content
+        fixed = self.client.get(reverse("marketing_image", args=[asset.pk]), {"w": 300, "chinh": "1"}).content
+        self.assertNotEqual(plain, fixed)
+        self.client.post(reverse("marketing_post_action", args=[post.pk, "anh-goc"]), {"i": "0"})
+        post.refresh_from_db()
+        self.assertFalse(post.items.order_by("order").first().original)
+
+    def test_legacy_posts_keep_their_version(self):
+        post = self.ready_post(2)
+        post.items.update(original=True)                                               # bài có từ trước khi có phần tự chỉnh
+        import hashlib
+        legacy = hashlib.sha256(json.dumps({"text": post.text, "assets": [i.asset.sha256 for i in post.items.order_by("order")],
+                                            "channels": [self.channel.pk]}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        self.assertEqual(services.package_sha(post), legacy)
+
+    def test_swapped_photos_rank_later_then_stop(self):
+        first = self.add("x1")
+        for i in range(4):
+            self.add(f"y{i}")
+        for _ in range(2):
+            post = services.create_post(self.mkt, "Bài thử đổi ảnh", [first], timezone.localdate())
+            services.swap_asset(self.mkt, post, 0)
+            Post.objects.filter(pk=post.pk).update(state=Post.State.REJECTED)
+        first.refresh_from_db()
+        self.assertEqual(first.passed_over, 2)
+        self.assertNotIn(first, writer.candidates())
+
+    def test_few_good_photos_note_and_supervisor_reminded_once_a_week(self):
+        self.add("tot", self.project)
+        for i in range(3):
+            self.add(f"nhoe{i}", self.project, blur=8)
+        with mock.patch("assistant.schedule.awake", return_value=True):
+            post = writer.draft(timezone.localdate(), project=self.project, brief="tiến độ", origin=Post.Origin.REQUEST, user=self.mkt)
+            self.assertEqual(post.items.count(), 1)                                    # đăng ít ảnh, không lấy ảnh hỏng
+            self.assertIn("chỉ có 1 ảnh đạt chuẩn", post.note)
+            self.assertIn("đã nhắc giám sát", post.note)
+            tip = self.texts(self.chats[self.site.pk])[-1]
+            self.assertIn("📸 Ảnh công trình TN-22", tip)
+            self.assertIn("nhoè", tip)
+            count = len(self.texts(self.chats[self.site.pk]))
+            writer.draft(timezone.localdate(), project=self.project, brief="lần 2", origin=Post.Origin.REQUEST, user=self.mkt)
+            self.assertEqual(len(self.texts(self.chats[self.site.pk])), count)       # một lần mỗi tuần
+        self.assertFalse(any("📸" in t for t in self.texts(self.chats[self.designer.pk])))   # chỉ giám sát công trình
 
 
 def PREFIX_ANCHOR(post):
