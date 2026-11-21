@@ -26,18 +26,27 @@ if [ "$REMOTE" = "tat" ]; then
   exit 0
 fi
 # Thu toi 3 lan, cach 30 giay: luc rclone (hoac sao luu ban cu) dang ghi lai tep cau hinh de lam moi quyen Google,
-# doc tep co the hut kho 'gdrive:' hoac chep loi tam thoi. Chi bao loi khi ca 3 lan deu hong.
+# doc tep co the hut kho 'gdrive:' hoac chep loi tam thoi. Chi bao loi khi ca 3 lan deu hong, KEM LY DO (loi rclone
+# that, da che chuoi dai giong khoa) de tin canh bao Telegram cho biet vi sao, khong phai doan.
+NAME="${REMOTE%%:*}:"
+hide() { tr '\n' ' ' | sed -E 's/[A-Za-z0-9_.+=-]{40,}/[da che]/g' | cut -c1-"$1"; }
 ok=""
+why=""
 for attempt in 1 2 3; do
-  if rclone listremotes 2>/dev/null | grep -qx "${REMOTE%%:*}:" \
-     && rclone copy "$DIR" "$REMOTE" --exclude '*.tam' --quiet; then
+  remotes=$(rclone listremotes 2>&1) || true          # doc het roi moi tim (khong noi ong vao grep -q)
+  if ! grep -qx -- "$NAME" <<<"$remotes"; then
+    why="rclone khong thay kho '$NAME' trong cau hinh: $(rclone config file 2>&1 | hide 160) Cac kho dang co: $(printf '%s' "${remotes:-khong co}" | hide 160)"
+  elif err=$(rclone copy "$DIR" "$REMOTE" --exclude '*.tam' --quiet 2>&1); then
     ok=1
     break
+  else
+    why="rclone copy bao loi: $(printf '%s' "$err" | tail -n 4 | hide 400)"
   fi
   [ "$attempt" -lt 3 ] && sleep 30
 done
 if [ -z "$ok" ]; then
-  log "LOI: 3 lan chua chep duoc len $REMOTE (kho rclone '${REMOTE%%:*}:' khong doc duoc hoac mang loi). Anh/chung tu van tren may chu, gio sau thu lai."
+  log "LOI: 3 lan chua chep duoc len $REMOTE. Anh/chung tu van tren may chu, gio sau thu lai."
+  log "Ly do: $(printf '%s' "$why" | cut -c1-270)"
   exit 1
 fi
 date '+%d/%m/%Y %H:%M' > "$STATE/lan-cuoi-thanh-cong"
