@@ -111,6 +111,8 @@ TEND_AI_MONTHLY_USD = env.float("TEND_AI_MONTHLY_USD", default=4.0)
 # Trợ lý nội dung (bài đăng Facebook): mô hình và trần riêng (chủ dự án chốt 21/11/2026: Sonnet 5.5, 30 USD/tháng)
 TEND_MKT_AI_MODEL = env("TEND_MKT_AI_MODEL", default="claude-sonnet-5-5")
 TEND_MKT_AI_MONTHLY_USD = env.float("TEND_MKT_AI_MONTHLY_USD", default=30.0)
+# Gọi trợ lý trong chat riêng (@mkt, @ketoannoibo…): tự đóng sau số giờ không nhắn
+TEND_DESK_IDLE_HOURS = env.float("TEND_DESK_IDLE_HOURS", default=3.0)
 # Trợ lý nội dung số (đợt 10a): số bài nháp mỗi ngày; thư mục ảnh Drive đã kéo về máy chủ (ha-tang/keo-anh-noi-dung.sh).
 # Khoá Facebook: TEND_META_TOKEN (và TEND_META_TOKEN_<TÊN> cho tài khoản khác) — đọc thẳng từ môi trường, không qua settings.
 TEND_MKT_DAILY = env.int("TEND_MKT_DAILY", default=1)

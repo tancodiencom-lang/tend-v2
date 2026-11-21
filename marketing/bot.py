@@ -16,13 +16,14 @@ from projects.models import Project
 
 from . import assets as asset_files
 from . import jobs, publish, services, writer
-from .models import Channel, Idea, Post, PostTarget
+from .models import Asset, Channel, Idea, Post, PostTarget
 
 PREFIX = "📣 Nội dung: "
 COMMANDS = ("/ytuong", "/baiviet", "/noidung")
 HELP = ("• Nội dung số (Giám đốc, Marketing): /baiviet [TN-22] <yêu cầu> — trợ lý viết bài (gửi ảnh trước hoặc kèm ảnh; "
         "1–3 phút có bản duyệt); /ytuong <ý tưởng> — để dành cho bài hằng ngày; /noidung — bài chờ duyệt, /noidung 12 — xem "
-        "lại bài #12; trả lời (reply) tin BÀI NHÁP kèm ý muốn sửa để trợ lý sửa bài đó, hoặc kèm ảnh để thêm ảnh.")
+        "lại bài #12; trả lời (reply) tin BÀI NHÁP kèm ý muốn sửa để trợ lý sửa bài đó, hoặc kèm ảnh để thêm ảnh. "
+        "Gõ @mkt để làm việc liền với Trợ lý Marketing (ảnh, chữ đều vào bài), @dong để đóng.")
 PREVIEW = re.compile(r"BÀI NHÁP #(\d+)")
 
 
@@ -106,6 +107,8 @@ def _post(value):
 def callback(link_row, data, chat_id, state_set):
     """Nút mk:*. Trả chữ ngắn cho thông báo nút; tự gửi bản mới khi bài đổi."""
     parts = data.split(":")
+    if len(parts) > 1 and parts[1] in ("dr", "dn"):
+        return desk_choice(link_row, data)
     op, post = parts[1] if len(parts) > 1 else "", _post(parts[2] if len(parts) > 2 else "")
     arg = parts[3] if len(parts) > 3 else ""
     user = link_row.user
@@ -233,6 +236,143 @@ def reply_photo(link_row, post_id, photo, album=""):
     return None
 
 
+# ---------- bàn Marketing (gọi bằng @mkt; vai Marketing luôn ở bàn này) ----------
+
+DESK = "📣 "
+# Mở đầu rõ ràng mới tự quyết; còn lại (vd "sửa chữa nhà cũ cần lưu ý gì" là chủ đề, không phải ý sửa) thì hỏi bằng nút.
+NEW_WORDS = ("bai moi", "viet bai", "viet ve", "chu de", "bai ve", "/baiviet")
+EDIT_WORDS = ("sua lai", "sua bai", "sua cho", "sua doan", "sua phan", "sua cau", "sua:", "them phan", "them doan", "them y",
+              "them cau", "them hashtag", "them loi", "bo phan", "bo doan", "bo cau", "bo y", "bo hashtag", "bot ", "doi tieu de",
+              "doi giong", "doi cau", "doi doan", "viet lai", "ngan hon", "ngan gon", "dai hon", "ai:", "chinh lai", "chinh sua",
+              "thay ", "rut gon", "giu nguyen")
+
+
+def current_post(link_row):
+    """Bài đang làm: bài vừa nhắc tới trong bàn (còn sửa được), không thì bài nháp mới nhất người này giao trong 24 giờ."""
+    state = link_row.state or {}
+    post = Post.objects.filter(pk=state.get("mkt_post") or 0, state__in=services.EDITABLE).first()
+    if post is not None:
+        return post
+    since = timezone.now() - timedelta(hours=24)
+    return (Post.objects.filter(created_by=link_row.user, state__in=services.EDITABLE, created_at__gte=since)
+            .order_by("-pk").first())
+
+
+def _remember(link_row, **changes):
+    state = dict(link_row.state or {})
+    for key, value in changes.items():
+        if value is None:
+            state.pop(key, None)
+        else:
+            state[key] = value
+    link_row.state = state
+    ChatLink.objects.filter(pk=link_row.pk).update(state=state)
+
+
+def _pending(link_row):
+    ids = (link_row.state or {}).get("mkt_pending") or []
+    order = {pk: i for i, pk in enumerate(ids)}
+    return sorted(Asset.objects.filter(pk__in=ids), key=lambda a: order[a.pk])
+
+
+def _new_draft(link_row, text):
+    photos = _pending(link_row)
+    project, rest = _project(text)
+    jobs.request_draft(link_row.user, " ".join(rest.split()) or text.strip(), project, None, photos)
+    _remember(link_row, mkt_pending=None, mkt_post=None, mkt_text=None)
+    note = "" if jobs._ai_ready() else f" (Lưu ý: {writer.why_no_ai()}, bản nháp sẽ là chữ tạm.)"
+    return (DESK + f"Trợ lý đang viết bài mới{f' với {len(photos)} ảnh' if photos else ''} (khoảng 1–3 phút), xong gửi bản "
+            f"duyệt qua đây.{note}")
+
+
+def _revise(link_row, post, text):
+    if not jobs._ai_ready():
+        return DESK + f"Trợ lý chưa sửa bài #{post.pk} theo ý được: {writer.why_no_ai()}. Bấm ✍ Sửa chữ để thay nguyên văn."
+    try:
+        jobs.request_revise(link_row.user, post, text)
+    except (PermissionDenied, ValidationError) as error:
+        return "; ".join(getattr(error, "messages", [str(error)]))
+    _remember(link_row, mkt_post=post.pk, mkt_text=None)
+    return DESK + f"Trợ lý đang sửa bài #{post.pk} theo ý (khoảng 1 phút), xong gửi lại bản mới."
+
+
+def desk_text(link_row, text):
+    """Tin chữ ở bàn Marketing: chủ đề → bài mới; ý sửa → sửa bài đang làm; chưa rõ → hỏi bằng 2 nút."""
+    from core.text import fold
+    if not link_row.user.does_marketing:
+        return "Bàn Marketing dành cho Giám đốc và nhân viên Marketing."
+    folded = fold(text)
+    post = current_post(link_row)
+    if folded.startswith(NEW_WORDS) or post is None:
+        return _new_draft(link_row, re.sub(r"^/baiviet\s*", "", text.strip()))
+    if folded.startswith(EDIT_WORDS):
+        return _revise(link_row, post, text)
+    _remember(link_row, mkt_text=text[:2000], mkt_post=post.pk)
+    telegram.send(link_row.chat_id, DESK + f"Anh/chị muốn làm gì với ý này?\n\"{text[:200]}\"",
+                  [[{"text": f"✍ Sửa bài #{post.pk} theo ý này", "data": f"mk:dr:{post.pk}"}],
+                   [{"text": "📝 Viết bài mới về chủ đề này", "data": "mk:dn:0"}]])
+    return None
+
+
+def desk_photo(link_row, photo, album="", caption=""):
+    """Ảnh ở bàn Marketing: thêm vào bài đang làm (ảnh lẻ gửi lại bản mới, album báo một lần); chưa có bài thì để dành cho
+    bài sắp viết. Ảnh kèm chữ: chữ xử lý như tin ở bàn (chủ đề mới dùng luôn các ảnh để dành)."""
+    from core.text import fold
+    if not link_row.user.does_marketing:
+        return "Bàn Marketing dành cho Giám đốc và nhân viên Marketing."
+    try:
+        with photo.image.open("rb") as handle:
+            data = handle.read()
+    except OSError:
+        return "Không đọc được ảnh, gửi lại giúp."
+    asset = asset_files.add_upload(link_row.user, data, photo.image.name.rsplit("/", 1)[-1],
+                                   context=re.sub(r"^/\S+\s*", "", caption or photo.caption or ""))
+    if asset is None:
+        return "Ảnh không dùng được (không phải ảnh hoặc quá lớn)."
+    _mark_content(photo)
+    post = current_post(link_row)
+    wants_new = caption and fold(caption).startswith(NEW_WORDS)
+    if post is not None and not wants_new:
+        try:
+            post = services.add_asset(link_row.user, post, asset)
+        except (PermissionDenied, ValidationError) as error:
+            return "; ".join(getattr(error, "messages", [str(error)]))
+        _remember(link_row, mkt_post=post.pk)
+        if caption and fold(caption).startswith(EDIT_WORDS):
+            return _revise(link_row, post, caption)
+        if album:
+            if (link_row.state or {}).get("mkt_album") == album:
+                return None
+            _remember(link_row, mkt_album=album)
+            return DESK + f"Đang thêm các ảnh vào bài #{post.pk}. Xem bản mới: /noidung {post.pk}"
+        send_preview(post, [link_row])
+        return None
+    pending = list(dict.fromkeys(((link_row.state or {}).get("mkt_pending") or []) + [asset.pk]))[-10:]
+    _remember(link_row, mkt_pending=pending)
+    if caption:
+        return _new_draft(link_row, caption)
+    if album and (link_row.state or {}).get("mkt_album") == album:
+        return None
+    _remember(link_row, mkt_album=album or None)
+    return DESK + f"Đã nhận ảnh cho bài sắp viết ({len(pending)} ảnh). Nhắn chủ đề để trợ lý viết."
+
+
+def desk_choice(link_row, data):
+    """Nút hỏi ở bàn Marketing: mk:dr:<bài> sửa bài theo ý vừa nhắn; mk:dn:0 viết bài mới về ý đó."""
+    text = (link_row.state or {}).get("mkt_text")
+    if not text:
+        return "Ý đó đã xử lý rồi, nhắn lại giúp."
+    parts = data.split(":")
+    if parts[1] == "dn":
+        telegram.send(link_row.chat_id, _new_draft(link_row, text))
+        return "✓ Viết bài mới."
+    post = _post(parts[2] if len(parts) > 2 else "")
+    if post is None:
+        return "Không tìm thấy bài."
+    telegram.send(link_row.chat_id, _revise(link_row, post, text))
+    return f"✓ Sửa bài #{post.pk}."
+
+
 def _project(text):
     for project in Project.objects.filter(active=True):
         if re.search(rf"(?<![\w-]){re.escape(project.code)}(?![\w-])", text, re.I):
@@ -294,7 +434,8 @@ def command(link_row, name, text):
         idea = services.add_idea(user, rest, Idea.Kind.IDEA, project)
         return f"✓ Đã ghi ý tưởng #{idea.pk}. Trợ lý dùng cho bài hằng ngày (ưu tiên ý tưởng cũ trước)."
     if name == "/baiviet":
-        items = _sent_photos(link_row)
+        items = list(dict.fromkeys(_pending(link_row) + _sent_photos(link_row)))     # ảnh để dành ở bàn Marketing + ảnh vừa gửi
+        _remember(link_row, mkt_pending=None)
         if not rest and not items:
             return "Nhắn /baiviet kèm chủ đề, vd: /baiviet dầm tum thang máy hay bị bỏ sót — vì sao, hậu quả, cách làm đúng."
         jobs.request_draft(user, rest, project, None, items)
